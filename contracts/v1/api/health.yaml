@@ -1,0 +1,35 @@
+# Customer 360 - Health Check API
+# Infrastructure monitoring endpoint for load balancers and uptime checks.
+
+bounded_context: system
+base_path: /api
+
+endpoints:
+
+  # --- GET /api/health ---
+  - method: GET
+    path: /health
+    summary: System health check for monitoring and load balancers
+    auth_required: false
+    note: >
+      For detailed diagnostics requiring authentication, the system.health.read
+      permission governs access level. Public health checks return basic status only.
+
+    response:
+      200:
+        body:
+          status:  { type: string, enum: [healthy, degraded, unhealthy] }
+          version: { type: string }
+          checks:
+            database:       { type: string, enum: [up, down] }
+            llm_provider:   { type: string, enum: [up, down] }
+            redis:          { type: string, enum: [up, down] }
+            message_broker: { type: string, enum: [up, down], desc: "RabbitMQ (dev) / SNS+SQS (production)" }
+        example:
+          status: "healthy"
+          version: "1.0.0"
+          checks:
+            database: "up"
+            llm_provider: "up"
+            redis: "up"
+            message_broker: "up"

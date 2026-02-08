@@ -61,4 +61,14 @@
 - **Source isolation** — `is_active` flag on sources table acts as a kill switch. Disable a source and all its future data is rejected at the edge.
 - **Redis TTL on tokens** — even if Redis is stale, worst case is a 5-minute window before revocation takes effect. Active invalidation reduces this to near-zero.
 - **JSONB for event data** — flexible schema, but sensitive fields (PII) can be encrypted at the field level before storage.
-- **Production additions** — OAuth2/JWT for API consumers, RBAC for data access, TLS everywhere, PII encryption at rest, audit logging on all data access.
+
+### Bonus: Auth & RBAC Design (Contracts Layer)
+While auth is not implemented in the assignment, the full design is documented in `contracts/v1/`:
+
+- **Team-based roles** — 5 roles (sales, support, cs_manager, ops, admin) with 13 granular permissions in `resource.action` format.
+- **LLM permission enforcement via two-channel architecture** — the hard problem: how do you enforce RBAC when users interact through an AI agent? Solution:
+  - **Gate 1 (Soft/UX):** Filter the LLM's tool definitions by user permissions *before* calling the LLM. A sales user's agent literally cannot see source management tools — the LLM can't call what it doesn't know exists.
+  - **Gate 2 (Hard/Security):** Service layer checks permissions on every tool execution using the user context from the JWT (passed via application memory, never through the LLM). Even if Gate 1 fails (prompt injection, bug), Gate 2 blocks unauthorized access with deterministic code.
+  - **Two channels:** The user's auth token and the LLM's data travel on separate code paths. They converge only at the service layer. The LLM cannot read, forge, or manipulate the user context.
+- **User stories with acceptance criteria** — 8 stories covering SSO login, role-aware UI, user management, API enforcement, and LLM permission gating (see `contracts/v1/user-stories.yaml`, EPIC-5).
+- **Full contract references:** `contracts/v1/models/user.yaml` (roles, permissions, AgentUserContext), `contracts/v1/api/chat.yaml` (permission_enforcement, two_channel_architecture, tool_permission_map).

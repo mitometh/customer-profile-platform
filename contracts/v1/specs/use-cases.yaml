@@ -1,0 +1,189 @@
+# Customer 360 - Use Cases
+# Context: see domain/context-map.yaml | Glossary: see _glossary.yaml
+
+use_cases:
+
+  # --- UC-1: Ask Customer Question (Core) ---
+  - id: UC-1
+    name: Ask Customer Question via Chat
+    priority: critical
+    actor: internal_user
+    context: conversational-agent
+
+    trigger: User submits a message in the chat interface
+
+    preconditions:
+      - Chat interface is accessible
+      - Database contains customer data
+      - LLM provider is available
+
+    main_flow:
+      1: User types natural language question
+      2: Create or retrieve chat session
+      3: Orchestrator receives message + history, plans retrieval
+      4: Delegates to retriever with structured request
+      5: Retriever executes tool calls (parameterized queries, never raw SQL)
+      6: Orchestrator synthesizes response with source citations
+      7: Returns answer + sources + tool call history
+
+    postconditions:
+      - Data-only responses (no hallucination), source-attributed, history updated
+
+    alternative_flows:
+      UC-1-A: { name: Casual Message, condition: "Greeting/thanks/non-data", at_step: 3, action: Orchestrator responds directly — no retriever }
+      UC-1-B: { name: Customer Not Found, condition: "Doesn't exist", at_step: 6, action: "'I couldn't find...' — no fabrication" }
+      UC-1-C: { name: Ambiguous Match, condition: "Multiple matches", at_step: 6, action: Lists all, asks for clarification }
+      UC-1-D: { name: Follow-Up (Multi-Turn), condition: "References previous context", at_step: 3, action: Resolves via history before retrieval }
+
+    error_flows:
+      UC-1-E1: { name: LLM Unavailable, condition: "LLM error/timeout", action: User-friendly error with retry guidance }
+      UC-1-E2: { name: DB Query Failure, condition: "Service layer fails", action: Retrieval failure message — no internals exposed }
+
+  # --- UC-2: Browse Customer List ---
+  - id: UC-2
+    name: Browse Customer List
+    priority: high
+    actor: internal_user
+    context: customer-management
+    trigger: User navigates to customer list
+    preconditions: [Customer data seeded/ingested]
+    main_flow:
+      1: Request list (optional search/filter)
+      2: Query with optional filters
+      3: Return paginated CustomerSummary results
+    postconditions: [Cursor-based pagination, includes name/contact/contract_value/currency_code/signup_date/source_name]
+    alternative_flows:
+      UC-2-A: { name: No Results, condition: "Empty database or no matches", action: "200 with empty data[] array" }
+      UC-2-B: { name: Permission Denied, condition: "Lacks customers.read", action: "403 Forbidden" }
+    error_flows:
+      UC-2-E1: { name: DB Failure, condition: "Database unavailable", action: "500 Internal Error" }
+
+  - id: UC-3
+    name: View Customer Detail
+    priority: high
+    actor: internal_user
+    context: customer-management
+    trigger: User selects a customer or queries by ID
+    preconditions: [Customer exists]
+    main_flow:
+      1: Request detail for specific customer
+      2: Retrieve profile + recent events + metrics
+      3: Return aggregated 360 view
+    postconditions: [Profile + activity + metrics, source-attributed]
+    alternative_flows:
+      UC-3-A: { name: Not Found, condition: "Customer ID does not exist or is soft-deleted", action: "404 Not Found" }
+      UC-3-B: { name: Permission Denied, condition: "Lacks customers.read", action: "403 Forbidden" }
+    error_flows:
+      UC-3-E1: { name: DB Failure, condition: "Database unavailable", action: "500 Internal Error" }
+
+  - id: UC-4
+    name: View Customer Activity Timeline
+    priority: high
+    actor: internal_user
+    context: activity-tracking
+    trigger: User requests activity for a customer
+    preconditions: [Customer exists, Events ingested]
+    main_flow:
+      1: Request events (optional type/date filters)
+      2: Query sorted by occurred_at desc
+      3: Return paginated events with source attribution
+    postconditions: [Reverse-chronological, source-attributed]
+    alternative_flows:
+      UC-4-A: { name: Customer Not Found, condition: "Customer ID does not exist", action: "404 Not Found" }
+      UC-4-B: { name: No Events, condition: "No events match filters", action: "200 with empty data[] array" }
+      UC-4-C: { name: Permission Denied, condition: "Lacks events.read", action: "403 Forbidden" }
+    error_flows:
+      UC-4-E1: { name: DB Failure, condition: "Database unavailable", action: "500 Internal Error" }
+
+  - id: UC-5
+    name: Explore Metrics Catalog
+    priority: medium
+    actor: internal_user
+    context: metrics-engine
+    trigger: User or agent requests available metrics
+    preconditions: [Metric definitions registered]
+    main_flow:
+      1: Query metric_definitions
+      2: Return all with id, name, display_name, description, unit, value_type
+    postconditions: [All metrics with full descriptions, agent can discover dynamically]
+    alternative_flows:
+      UC-5-A: { name: Empty Catalog, condition: "No metric definitions configured", action: "200 with empty metrics[] array" }
+      UC-5-B: { name: Permission Denied, condition: "Lacks metrics.catalog.read", action: "403 Forbidden" }
+
+  # --- Production Use Cases ---
+
+  - id: UC-6
+    name: Ingest Data via Webhook
+    priority: medium
+    actor: external_source
+    context: source-integration
+    scope: both
+    assignment_note: >
+      Implemented with RabbitMQ fan-out (replaces SNS/SQS) and Redis token cache.
+      Three worker consumers (data-store, metrics, alerts) run as Docker containers.
+    trigger: POST /hooks/ingest
+    preconditions: [Source registered, is_active=true, valid token]
+    main_flow:
+      1: Validate token (Redis-cached, TTL 5min, DB fallback on miss)
+      2: Wrap payload in standard envelope with source_id + metadata
+      3: Publish to message broker (RabbitMQ in dev, SNS in production)
+      4: Return 202 Accepted
+      5: "Downstream consumers process independently:"
+      6: "  - Data Store: transform + resolve customer + write event to DB"
+      7: "  - Metrics: recalculate affected customer metrics"
+      8: "  - Alerts: check thresholds, log warnings"
+    postconditions: [Event persisted, metrics recalculated, thresholds checked]
+    alternative_flows:
+      UC-6-A: { name: Invalid Token, condition: "Bad/revoked token", action: "401 immediately" }
+      UC-6-B: { name: Inactive Source, condition: "is_active=false", action: "401 — source deactivated" }
+
+  - id: UC-7
+    name: Manage Source Integration
+    priority: low
+    actor: admin
+    context: source-integration
+    scope: production
+    assignment_note: Sources seeded; no admin API.
+    trigger: Admin action via API/dashboard
+    main_flow:
+      1: Register, deactivate, or rotate keys
+      2: Update sources table, invalidate cached tokens
+
+  - id: UC-8
+    name: Authenticate Internal User
+    priority: high
+    actor: internal_user
+    context: identity-access
+    scope: both
+    assignment_note: >
+      Built-in JWT auth with email+password login endpoint.
+      Production would swap to SSO/OAuth2 — JWT payload and downstream auth logic unchanged.
+    trigger: User submits login credentials (assignment) or accesses via SSO (production)
+    preconditions: [Active account exists]
+    main_flow:
+      1: "Assignment: POST /api/auth/login with email+password. Production: redirect to SSO."
+      2: Verify credentials, lookup user, verify is_active
+      3: "Resolve role → permissions"
+      4: Issue JWT (contains user_id, role, permissions), update last_login_at
+      5: Return JWT + user profile
+    alternative_flows:
+      UC-8-A: { name: Invalid Credentials, condition: "Wrong email/password", action: "401 — invalid credentials" }
+      UC-8-B: { name: Not Found, condition: "Email not in users", action: "401 — invalid credentials (no user enumeration)" }
+      UC-8-C: { name: Deactivated, condition: "is_active=false", action: "401 — invalid credentials (same message as UC-8-A to prevent account enumeration)" }
+
+  - id: UC-9
+    name: Manage Internal Users
+    priority: medium
+    actor: admin
+    context: identity-access
+    scope: both
+    trigger: Admin action via API/dashboard
+    preconditions: [Caller has admin role, valid JWT]
+    main_flow:
+      1: Create user (email+name+role), update role, or deactivate
+      2: Validate, apply changes
+    postconditions: [Changes effective on next request, deactivated users locked out immediately]
+    alternative_flows:
+      UC-9-A: { name: Non-Admin, condition: "Caller not admin", action: "403 Forbidden" }
+      UC-9-B: { name: Self-Deactivation Blocked, condition: "Admin attempts to deactivate themselves as last active admin", action: "400 — cannot deactivate last active admin" }
+      UC-9-C: { name: Duplicate Email, condition: "Email already exists", action: "400 — email already registered" }

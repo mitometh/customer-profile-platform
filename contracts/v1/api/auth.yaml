@@ -1,0 +1,119 @@
+# Customer 360 - Auth & User Management API
+# Story refs: US-5.1, US-5.2, US-5.4
+# Assignment: built-in JWT auth (email+password login).
+# Production: swap login flow to SSO/OAuth2 — JWT payload and downstream logic unchanged.
+
+bounded_context: identity-access
+base_path: /api
+
+endpoints:
+
+  # --- POST /api/auth/login ---
+  - method: POST
+    path: /auth/login
+    summary: Authenticate user and receive JWT
+    story_refs: [US-5.1]
+    scope: assignment
+    production_note: >
+      In production, this endpoint is replaced by SSO/OAuth2 flow.
+      The JWT payload format remains identical.
+
+    request:
+      body:
+        - email:    { type: email, required: true }
+        - password: { type: string, required: true, min: 1, max: 128 }
+
+    response:
+      200:
+        body:
+          access_token: { type: string, desc: "JWT containing user_id, role, permissions" }
+          token_type:   { type: string, const: bearer }
+          user: { ref: models/user.yaml#CurrentUser }
+        example:
+          access_token: "eyJhbGciOiJIUzI1NiIs..."
+          token_type: "bearer"
+          user:
+            id: "550e8400-e29b-41d4-a716-446655440000"
+            email: "john@company.com"
+            full_name: "John Smith"
+            role: "sales"
+            permissions: ["customers.read", "events.read", "metrics.read", "chat.use"]
+      400: { ref: common.yaml#error_response, desc: "Malformed request (missing/invalid email or password)" }
+      401: { ref: common.yaml#error_response, desc: "Invalid credentials or deactivated account" }
+
+  # --- GET /api/auth/me ---
+  - method: GET
+    path: /auth/me
+    summary: Get current user profile and permissions
+    story_refs: [US-5.2]
+    auth_required: true
+
+    response:
+      200:
+        body: { ref: models/user.yaml#CurrentUser }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+
+  # --- POST /api/users ---
+  - method: POST
+    path: /users
+    summary: Create a new user (admin only)
+    story_refs: [US-5.4]
+    auth_required: true
+    required_permission: users.manage
+
+    request:
+      body:
+        - email:     { type: email, required: true }
+        - full_name: { type: string, required: true, max: 255 }
+        - password:  { type: string, required: true, min: 8, max: 128 }
+        - role:      { type: string, required: true, enum: [sales, support, cs_manager, ops, admin] }
+
+    response:
+      201:
+        body: { ref: models/user.yaml#UserSummary }
+      400: { ref: common.yaml#error_response, desc: "Validation error (duplicate email, invalid role)" }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Caller lacks users.manage permission" }
+
+  # --- PATCH /api/users/{id} ---
+  - method: PATCH
+    path: /users/{id}
+    summary: Update user role or deactivate (admin only)
+    story_refs: [US-5.4]
+    auth_required: true
+    required_permission: users.manage
+
+    request:
+      path_params:
+        - id: { type: uuid }
+      body:
+        - role:      { type: string, optional: true, enum: [sales, support, cs_manager, ops, admin] }
+        - is_active: { type: boolean, optional: true, desc: "false = deactivate, block login" }
+
+    response:
+      200:
+        body: { ref: models/user.yaml#UserSummary }
+      400: { ref: common.yaml#error_response, desc: "Validation error (invalid role value)" }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Caller lacks users.manage permission" }
+      404: { ref: common.yaml#error_response }
+
+  # --- GET /api/users ---
+  - method: GET
+    path: /users
+    summary: List all users with role assignments (admin only)
+    story_refs: [US-5.4]
+    auth_required: true
+    required_permission: users.read
+
+    request:
+      query_params:
+        - $ref: common.yaml#pagination.request
+
+    response:
+      200:
+        body:
+          data:       { type: "UserSummary[]", ref: models/user.yaml#UserSummary }
+          pagination: { ref: common.yaml#pagination.response }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Caller lacks users.read permission" }

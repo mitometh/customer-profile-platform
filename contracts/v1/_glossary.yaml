@@ -1,0 +1,52 @@
+# Customer 360 - Ubiquitous Language
+# Single source of truth for all term definitions.
+# Models, APIs, and specs reference this — do not redefine terms elsewhere.
+
+terms:
+
+  customer:
+    definition: A company/organization with a business relationship. Identified by company name + primary contact.
+    aliases: [account, client, organization]
+    model_ref: models/customer.yaml
+
+  event:
+    definition: Timestamped activity record from any source. Append-only (never modified after creation).
+    aliases: [activity, interaction, touchpoint]
+    model_ref: models/event.yaml
+
+  source:
+    definition: External system that pushes data via webhook. Each source has a unique API token.
+    aliases: [integration, connector, data-source]
+    examples: [Salesforce, Jira, Slack, HubSpot, Intercom]
+    model_ref: models/source.yaml
+
+  metric:
+    definition: Pre-computed KPI per customer, stored as key-value. Defined in a self-describing catalog.
+    examples: [support_tickets_last_30d, health_score, days_since_last_contact]
+    model_ref: models/metric.yaml
+
+  orchestrator_agent:
+    definition: Primary AI agent. Receives messages, manages context, delegates retrieval, synthesizes response with citations.
+
+  retriever_agent:
+    definition: Subordinate AI agent. Executes data-fetching tools, returns raw data to orchestrator. Never talks to user.
+
+  session:
+    definition: Conversation context grouping related messages. Enables multi-turn (e.g., pronoun resolution).
+
+  hallucination:
+    definition: AI-generated info not grounded in data. Prevented via tool-calling architecture and source attribution.
+
+  role:
+    definition: Team-based access level. One role per user. Determines accessible resources and actions.
+    examples: [sales, support, cs_manager, ops, admin]
+    model_ref: rbac/roles.yaml
+
+  permission:
+    definition: "Granular access right in format resource.action (e.g., customers.read). Grouped into roles, never assigned directly."
+    model_ref: rbac/permissions.yaml
+
+  user:
+    definition: An authenticated internal team member who interacts with the system. Each user has exactly one role determining their access level.
+    aliases: [team member, operator]
+    model_ref: models/user.yaml

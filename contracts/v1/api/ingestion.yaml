@@ -1,0 +1,79 @@
+# Customer 360 - Ingestion API
+# Story refs: US-4.1, US-4.2, US-4.3
+# POST /hooks/ingest is implemented in assignment (RabbitMQ fan-out).
+# Source CRUD (POST/PATCH /api/sources) remains production-only — sources are seeded.
+
+bounded_context: source-integration
+# Note: Webhook endpoint uses /hooks prefix (not /api) — intentionally separate from the authenticated API.
+# Source CRUD endpoints (production-only) use /api prefix, hardcoded in their paths.
+
+endpoints:
+
+  # --- POST /hooks/ingest ---
+  - method: POST
+    path: /hooks/ingest
+    summary: Receive data from external source via webhook
+    story_refs: [US-4.1]
+    scope: both
+    desc: >
+      Single endpoint for all sources. Validates token (Redis-cached), publishes to
+      message broker (RabbitMQ in dev, SNS in production), returns 202.
+      Three downstream consumers process independently: data-store, metrics, alerts.
+
+    request:
+      headers:
+        - X-Source-Token: { type: string, required: true, desc: "Per-source API token" }
+      body:
+        - event_type:          { type: enum, ref: common.yaml#event_type, required: true, extensible: true }
+        - customer_identifier: { type: string, required: true, desc: "Source-specific customer ID, resolved downstream" }
+      resolution_strategy:
+        desc: >
+          The customer_identifier is resolved to a customers.id UUID during downstream processing by worker-data.
+          Resolution attempts: (1) exact match on customers.company_name (case-insensitive),
+          (2) exact match on customers.email. If no match is found, the event is stored with
+          customer_id=null and flagged for manual review.
+        - title:               { type: string, required: true, max: 255 }
+        - description:         { type: string, optional: true }
+        - occurred_at:         { type: timestamp, required: true }
+        - data:                { type: object, optional: true }
+
+    response:
+      202: { body: { status: "accepted", event_id: { type: uuid } } }
+      401: { ref: common.yaml#error_response, desc: "Invalid/revoked token" }
+      400: { ref: common.yaml#error_response, desc: "Malformed payload" }
+
+  # --- POST /api/sources ---
+  - method: POST
+    path: /api/sources
+    summary: Register a new data source
+    story_refs: [US-4.2]
+    scope: production
+    auth: admin
+
+    request:
+      body:
+        - name:        { type: string, required: true, max: 100 }
+        - description: { type: string, optional: true }
+
+    response:
+      201:
+        body: { id: uuid, name: string, api_token: string, is_active: boolean, created_at: timestamp }
+        note: "api_token shown only at creation — source must store securely"
+
+  # --- PATCH /api/sources/{id} ---
+  - method: PATCH
+    path: /api/sources/{id}
+    summary: Activate/deactivate a source
+    story_refs: [US-4.3]
+    scope: production
+    auth: admin
+
+    request:
+      path_params:
+        - id: { type: uuid }
+      body:
+        - is_active: { type: boolean, optional: true, desc: "false = reject all future requests" }
+
+    response:
+      200: { desc: "Source updated" }
+      404: { ref: common.yaml#error_response }

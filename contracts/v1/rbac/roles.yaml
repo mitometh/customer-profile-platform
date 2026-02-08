@@ -1,0 +1,58 @@
+# Customer 360 - Role Definitions
+# Each role has a fixed permission set. Users have exactly one role.
+# Permission details: see permissions.yaml
+
+roles:
+
+  - name: sales
+    display_name: Sales
+    desc: Customer contracts, activity, and health scores for deals/renewals.
+    permissions: [customers.read, events.read, metrics.read, chat.use]
+
+  - name: support
+    display_name: Support
+    desc: Tickets and customer context for better service.
+    permissions: [customers.read, events.read, metrics.read, chat.use]
+
+  - name: cs_manager
+    display_name: Customer Success Manager
+    desc: Full read access to all customer data. Can export.
+    permissions: [customers.read, customers.export, events.read, metrics.read, metrics.catalog.read, chat.use]
+
+  - name: ops
+    display_name: Operations
+    desc: System health, data quality, and ingestion pipeline monitoring.
+    permissions: [customers.read, events.read, metrics.read, metrics.catalog.read, sources.read, chat.use, system.health.read]
+
+  - name: admin
+    display_name: Administrator
+    desc: Full platform access. Only role that can manage users and sources.
+    permissions:
+      - customers.read
+      - customers.export
+      - events.read
+      - metrics.read
+      - metrics.catalog.read
+      - metrics.catalog.manage
+      - sources.read
+      - sources.manage
+      - users.read
+      - users.manage
+      - chat.use
+      - system.health.read
+
+# --- Permission Matrix (Quick Reference) ---
+# Resource              | sales | support | cs_mgr | ops   | admin |
+# ----------------------|-------|---------|--------|-------|-------|
+# customers.read        |   Y   |    Y    |   Y    |   Y   |   Y   |
+# customers.export      |       |         |   Y    |       |   Y   |
+# events.read           |   Y   |    Y    |   Y    |   Y   |   Y   |
+# metrics.read          |   Y   |    Y    |   Y    |   Y   |   Y   |
+# metrics.catalog.read  |       |         |   Y    |   Y   |   Y   |
+# metrics.catalog.manage|       |         |        |       |   Y   |
+# sources.read          |       |         |        |   Y   |   Y   |
+# sources.manage        |       |         |        |       |   Y   |
+# users.read            |       |         |        |       |   Y   |
+# users.manage          |       |         |        |       |   Y   |
+# chat.use              |   Y   |    Y    |   Y    |   Y   |   Y   |
+# system.health.read    |       |         |        |   Y   |   Y   |

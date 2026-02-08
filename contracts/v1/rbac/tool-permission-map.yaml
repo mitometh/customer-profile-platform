@@ -1,0 +1,46 @@
+# Customer 360 - Tool-to-Permission Mapping
+# Used by Gate 1 (tool filtering) and Gate 2 (service layer enforcement).
+# Architecture: see behavior/permission-enforcement.yaml
+
+scope: both
+
+tools:
+
+  # Customer tools — all roles with customers.read
+  - tool: lookup_customer
+    permission: customers.read
+    desc: Look up a customer by name or ID
+    available_to: [sales, support, cs_manager, ops, admin]
+
+  - tool: list_customers
+    permission: customers.read
+    desc: List/search customers
+    available_to: [sales, support, cs_manager, ops, admin]
+
+  # Event tools
+  - tool: query_events
+    permission: events.read
+    desc: Query customer activity events
+    available_to: [sales, support, cs_manager, ops, admin]
+
+  # Metric tools — read vs catalog differ
+  - tool: get_metric
+    permission: metrics.read
+    desc: Get a metric value for a customer
+    available_to: [sales, support, cs_manager, ops, admin]
+
+  - tool: get_metrics_catalog
+    permission: metrics.catalog.read
+    desc: List all metric definitions
+    available_to: [cs_manager, ops, admin]
+
+  # Source tools — restricted
+  - tool: get_sources_list
+    permission: sources.read
+    desc: List registered data sources
+    available_to: [ops, admin]
+
+  - tool: get_source_status
+    permission: sources.read
+    desc: Check a source's health and activity
+    available_to: [ops, admin]

@@ -1,0 +1,42 @@
+# Customer 360 - Chat Session Model
+# Term definition: see _glossary.yaml
+
+bounded_context: conversational-agent
+
+# --- Entity ---
+entity:
+  name: ChatSession
+  table: chat_sessions
+
+  fields:
+    - id:              { type: uuid, immutable: true }
+    - user_id:         { type: uuid, indexed: true, ref: "users.id" }
+    - last_message_at: { type: timestamp }
+    - message_count:   { type: integer, default: 0 }
+    - is_active:       { type: boolean, default: true, desc: "false when session is expired or closed" }
+    - created_at:      { type: timestamp, auto: true }
+    - updated_at:      { type: timestamp, auto: true }
+    - deleted_at:      { type: timestamp, nullable: true, indexed: true }
+    - deleted_by:      { type: uuid, nullable: true, ref: "users.id" }
+
+# --- Sub-Entity ---
+sub_entity:
+  name: ChatMessage
+  table: chat_messages
+  write_pattern: append-only
+  # Messages are immutable once created. No updates, no deletes.
+
+  fields:
+    - id:         { type: uuid, immutable: true }
+    - session_id: { type: uuid, indexed: true, ref: "chat_sessions.id" }
+    - role:       { type: enum, ref: common.yaml#message_role }
+    - content:    { type: string }
+    - sources:    { type: jsonb, optional: true, desc: "Source attribution for assistant messages" }
+    - tool_calls: { type: jsonb, optional: true, desc: "Tool call history for assistant messages" }
+    - created_at: { type: timestamp, auto: true }
+
+# --- Notes ---
+# Sessions follow the global soft-delete convention (deleted_at filter).
+# Bulk cleanup of old sessions can set deleted_at in batch — no hard deletes.
+# ChatMessages are append-only and cascade with session soft-delete
+# (queries join on session and inherit the deleted_at filter).

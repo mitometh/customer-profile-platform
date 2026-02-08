@@ -1,0 +1,35 @@
+# Customer 360 - Events API
+# Story refs: US-2.4
+
+bounded_context: activity-tracking
+base_path: /api
+
+endpoints:
+
+  # --- GET /api/customers/{id}/events ---
+  - method: GET
+    path: /customers/{customer_id}/events
+    summary: Customer activity timeline with filters
+    story_refs: [US-2.4]
+    auth_required: true
+    required_permission: events.read
+    soft_delete: exclude deleted_at IS NOT NULL
+
+    request:
+      path_params:
+        - customer_id: { type: uuid }
+      query_params:
+        - event_type: { type: enum, ref: common.yaml#event_type, optional: true }
+        - since:      { type: timestamp, optional: true, desc: "Events after this time" }
+        - until:      { type: timestamp, optional: true, desc: "Events before this time" }
+        - order:      { type: enum, ref: common.yaml#sort_order, default: desc }
+        - $ref: common.yaml#pagination.request
+
+    response:
+      200:
+        body:
+          data:       { type: "EventSummary[]", ref: models/event.yaml#EventSummary }
+          pagination: { ref: common.yaml#pagination.response }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Lacks events.read permission" }
+      404: { ref: common.yaml#error_response }
