@@ -27,6 +27,7 @@ files:
     event.yaml: Event entity and response shapes
     metric.yaml: MetricDefinition + CustomerMetric + CustomerMetricHistory entities and response shapes
     user.yaml: User entity and response shapes
+    role.yaml: Role, Permission, and RolePermission entities (RBAC infrastructure)
     source.yaml: Source entity and response shapes (external integration systems)
     session.yaml: ChatSession + ChatMessage entities (internal agent state)
 
@@ -36,12 +37,14 @@ files:
     tool-permission-map.yaml: Maps agent tools to required permissions
 
   api:
-    auth.yaml: "POST /api/auth/login, GET /api/auth/me, POST /api/users, PATCH /api/users/{id}"
-    customers.yaml: "GET /api/customers, GET /api/customers/{id}"
+    auth.yaml: "POST /api/auth/login, GET /api/auth/me, GET /api/users, POST /api/users, PATCH /api/users/{id}"
+    customers.yaml: "GET /api/customers, GET /api/customers/{id}, POST /api/customers, PATCH /api/customers/{id}, DELETE /api/customers/{id}"
     events.yaml: "GET /api/customers/{id}/events"
-    metrics.yaml: "GET /api/metrics/catalog, GET /api/customers/{id}/metrics, GET /api/customers/{id}/metrics/{metric_id}/history"
+    metrics.yaml: "GET /api/metrics/catalog, POST /api/metrics/catalog, PATCH /api/metrics/catalog/{id}, DELETE /api/metrics/catalog/{id}, GET /api/customers/{id}/metrics, GET /api/customers/{id}/metrics/{metric_id}/history"
     chat.yaml: "POST /api/chat"
-    ingestion.yaml: "POST /hooks/ingest, POST /api/sources, PATCH /api/sources/{id} [production]"
+    ingestion.yaml: "POST /hooks/ingest"
+    sources.yaml: "GET /api/sources, GET /api/sources/{id}, POST /api/sources, PATCH /api/sources/{id}, DELETE /api/sources/{id}"
+    roles.yaml: "GET /api/roles, GET /api/roles/{id}, POST /api/roles, PATCH /api/roles/{id}, DELETE /api/roles/{id}, GET /api/permissions"
     health.yaml: "GET /api/health"
 
   behavior:
@@ -67,14 +70,16 @@ scope:
       - Built-in JWT auth (email+password login)
       - Two-gate RBAC enforcement (Gate 1: tool filtering, Gate 2: service layer)
       - All 5 roles with permission sets
-      - Agent rules (AB-1 through AB-8)
+      - Agent rules (AB-1 through AB-9)
       - Webhook ingestion (POST /hooks/ingest) with RabbitMQ fan-out
       - Redis source token validation cache
       - Worker consumers (data-store, metrics, alerts)
       - Scheduler service (daily metric recalculation, health scores, days-since-contact)
       - User management API
-    excludes: [SSO/OAuth2 (uses email+password), Source CRUD API, Vector search, Batch LLM evaluator]
+      - Source CRUD API (GET list, GET detail, POST register, PATCH update, DELETE soft-delete)
+      - Role & Permission management API (GET roles, GET role detail, POST create role, PATCH update role, DELETE role, GET permissions)
+    excludes: [SSO/OAuth2 (uses email+password), Vector search, Batch LLM evaluator]
 
   production:
     description: Full features — upgrades from assignment
-    adds: [SSO/OAuth2 (replaces email+password login), SNS/SQS (replaces RabbitMQ), Source CRUD API, Vector search, Batch LLM evaluator, EventBridge Scheduler (replaces APScheduler)]
+    adds: [SSO/OAuth2 (replaces email+password login), SNS/SQS (replaces RabbitMQ), Vector search, Batch LLM evaluator, EventBridge Scheduler (replaces APScheduler)]

@@ -83,7 +83,7 @@ pagination:
 error_response:
   fields:
     error:
-      code:    { type: string, examples: [NOT_FOUND, VALIDATION_ERROR, INTERNAL_ERROR, LLM_UNAVAILABLE, RATE_LIMITED] }
+      code:    { type: string, examples: [NOT_FOUND, VALIDATION_ERROR, CONFLICT, INTERNAL_ERROR, LLM_UNAVAILABLE, RATE_LIMITED] }
       message: { type: string, example: "Customer with id '123' not found" }
       details: { type: object, optional: true, desc: "Additional context (e.g., field-level validation errors)" }
 
@@ -92,6 +92,7 @@ error_response:
     401: UNAUTHORIZED
     403: FORBIDDEN
     404: NOT_FOUND
+    409: CONFLICT
     429: RATE_LIMITED
     500: INTERNAL_ERROR
     503: LLM_UNAVAILABLE

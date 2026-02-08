@@ -16,7 +16,7 @@ entity:
     - email:         { type: email, max: 255, unique: true, desc: "Corporate email, used as login identifier" }
     - full_name:     { type: string, max: 255 }
     - password_hash: { type: string, max: 255, write_only: true, scope: assignment, desc: "Bcrypt-hashed password. Never included in any response. Production uses SSO." }
-    - role:          { type: string, max: 50, enum: [sales, support, cs_manager, ops, admin], ref: "rbac/roles.yaml" }
+    - role_id:       { type: uuid, ref: "roles.id", desc: "FK to roles table. Determines user's permission set via role_permissions join." }
     - is_active:     { type: boolean, default: true, desc: "Set false to revoke access without deleting" }
     - last_login_at: { type: timestamp, nullable: true }
     - created_at:    { type: timestamp, auto: true }

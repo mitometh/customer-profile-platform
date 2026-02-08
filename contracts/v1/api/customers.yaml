@@ -1,5 +1,5 @@
 # Customer 360 - Customers API
-# Story refs: US-2.1, US-2.2, US-2.3
+# Story refs: US-2.1, US-2.2, US-2.3, US-2.5, US-2.6, US-2.7
 
 bounded_context: customer-management
 base_path: /api
@@ -46,4 +46,81 @@ endpoints:
         body: { ref: models/customer.yaml#CustomerDetail }
       401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
       403: { ref: common.yaml#error_response, desc: "Lacks customers.read permission" }
+      404: { ref: common.yaml#error_response }
+
+  # --- POST /api/customers ---
+  - method: POST
+    path: /customers
+    summary: Create a new customer (admin only)
+    story_refs: [US-2.5]
+    auth_required: true
+    required_permission: customers.manage
+
+    request:
+      body:
+        - company_name:   { type: string, required: true, max: 255 }
+        - contact_name:   { type: string, optional: true, max: 255 }
+        - email:          { type: email, optional: true, max: 255 }
+        - phone:          { type: string, optional: true, max: 50 }
+        - industry:       { type: string, optional: true, max: 100 }
+        - contract_value: { type: currency, optional: true }
+        - currency_code:  { type: string, optional: true, max: 3, default: "USD" }
+        - signup_date:    { type: date, optional: true }
+        - notes:          { type: text, optional: true }
+
+    response:
+      201:
+        body: { ref: models/customer.yaml#CustomerDetail }
+      400: { ref: common.yaml#error_response, desc: "Validation error (missing company_name)" }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Caller lacks customers.manage permission" }
+
+  # --- PATCH /api/customers/{id} ---
+  - method: PATCH
+    path: /customers/{id}
+    summary: Update a customer (admin only)
+    story_refs: [US-2.6]
+    auth_required: true
+    required_permission: customers.manage
+    soft_delete: return 404 if deleted_at IS NOT NULL
+
+    request:
+      path_params:
+        - id: { type: uuid, desc: "Customer UUID" }
+      body:
+        - company_name:   { type: string, optional: true, max: 255 }
+        - contact_name:   { type: string, optional: true, max: 255 }
+        - email:          { type: email, optional: true, max: 255 }
+        - phone:          { type: string, optional: true, max: 50 }
+        - industry:       { type: string, optional: true, max: 100 }
+        - contract_value: { type: currency, optional: true }
+        - currency_code:  { type: string, optional: true, max: 3 }
+        - signup_date:    { type: date, optional: true }
+        - notes:          { type: text, optional: true }
+
+    response:
+      200:
+        body: { ref: models/customer.yaml#CustomerDetail }
+      400: { ref: common.yaml#error_response, desc: "Validation error" }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Caller lacks customers.manage permission" }
+      404: { ref: common.yaml#error_response }
+
+  # --- DELETE /api/customers/{id} ---
+  - method: DELETE
+    path: /customers/{id}
+    summary: Soft-delete a customer (admin only)
+    story_refs: [US-2.7]
+    auth_required: true
+    required_permission: customers.manage
+    soft_delete: set deleted_at, return 204
+
+    request:
+      path_params:
+        - id: { type: uuid, desc: "Customer UUID" }
+
+    response:
+      204: { desc: "Customer soft-deleted successfully (no body)" }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Caller lacks customers.manage permission" }
       404: { ref: common.yaml#error_response }

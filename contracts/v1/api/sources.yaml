@@ -1,0 +1,128 @@
+# Customer 360 - Source Management API
+# Story refs: US-4.2, US-4.3, US-4.4, US-4.5
+# Full CRUD for data source registration and lifecycle management.
+
+bounded_context: source-integration
+scope: both
+assignment_note: >
+  Source CRUD is implemented in the assignment phase to support full source
+  lifecycle management (register, view, update, deactivate, delete).
+
+endpoints:
+
+  # --- GET /api/sources ---
+  - method: GET
+    path: /api/sources
+    summary: List all registered data sources
+    story_refs: [US-4.4]
+    scope: both
+    auth: sources.read
+    gate_1: require_permission("sources.read")
+
+    request:
+      query_params:
+        - cursor: { type: string, optional: true, desc: "Cursor for keyset pagination" }
+        - limit:  { type: integer, optional: true, default: 20, min: 1, max: 100 }
+
+    response:
+      200:
+        body:
+          data:
+            type: array
+            items: { ref: "../models/source.yaml#SourceSummary" }
+          pagination: { ref: "../models/common.yaml#PaginationMeta" }
+      403: { ref: "../models/common.yaml#error_response", desc: "Missing sources.read permission" }
+
+  # --- GET /api/sources/{id} ---
+  - method: GET
+    path: /api/sources/{id}
+    summary: Get a single source by ID
+    story_refs: [US-4.4]
+    scope: both
+    auth: sources.read
+    gate_1: require_permission("sources.read")
+
+    request:
+      path_params:
+        - id: { type: uuid }
+
+    response:
+      200:
+        body: { ref: "../models/source.yaml#SourceDetail" }
+        note: "api_token_hash is NEVER included in the response"
+      403: { ref: "../models/common.yaml#error_response", desc: "Missing sources.read permission" }
+      404: { ref: "../models/common.yaml#error_response", desc: "Source not found or soft-deleted" }
+
+  # --- POST /api/sources ---
+  - method: POST
+    path: /api/sources
+    summary: Register a new data source
+    story_refs: [US-4.2]
+    scope: both
+    auth: sources.manage
+    gate_1: require_permission("sources.manage")
+
+    request:
+      body:
+        - name:        { type: string, required: true, max: 100 }
+        - description: { type: string, optional: true }
+
+    response:
+      201:
+        body: { id: uuid, name: string, api_token: string, is_active: boolean, created_at: timestamp }
+        note: "api_token shown only at creation — the caller must store it securely. It cannot be retrieved again."
+      403: { ref: "../models/common.yaml#error_response", desc: "Missing sources.manage permission" }
+      409: { ref: "../models/common.yaml#error_response", desc: "Source name already exists" }
+
+    behavior:
+      token_generation: "secrets.token_urlsafe(32) — cryptographically secure, URL-safe, ~43 chars"
+      token_storage: "SHA256 hash stored in api_token_hash column; raw token never persisted"
+
+  # --- PATCH /api/sources/{id} ---
+  - method: PATCH
+    path: /api/sources/{id}
+    summary: Update source name, description, or active status
+    story_refs: [US-4.3]
+    scope: both
+    auth: sources.manage
+    gate_1: require_permission("sources.manage")
+
+    request:
+      path_params:
+        - id: { type: uuid }
+      body:
+        - name:        { type: string, optional: true, max: 100 }
+        - description: { type: string, optional: true }
+        - is_active:   { type: boolean, optional: true, desc: "false = reject all future webhook requests from this source" }
+
+    response:
+      200:
+        body: { ref: "../models/source.yaml#SourceSummary" }
+      403: { ref: "../models/common.yaml#error_response", desc: "Missing sources.manage permission" }
+      404: { ref: "../models/common.yaml#error_response", desc: "Source not found or soft-deleted" }
+      409: { ref: "../models/common.yaml#error_response", desc: "Source name already exists" }
+
+    behavior:
+      cache_invalidation: "When is_active changes, invalidate Redis token cache for this source"
+
+  # --- DELETE /api/sources/{id} ---
+  - method: DELETE
+    path: /api/sources/{id}
+    summary: Soft-delete a data source
+    story_refs: [US-4.5]
+    scope: both
+    auth: sources.manage
+    gate_1: require_permission("sources.manage")
+
+    request:
+      path_params:
+        - id: { type: uuid }
+
+    response:
+      204: { desc: "Source soft-deleted. No response body." }
+      403: { ref: "../models/common.yaml#error_response", desc: "Missing sources.manage permission" }
+      404: { ref: "../models/common.yaml#error_response", desc: "Source not found or already deleted" }
+
+    behavior:
+      cache_invalidation: "Invalidate Redis token cache for this source before soft-deleting"
+      soft_delete: "Sets deleted_at and deleted_by. Source data preserved; webhook requests rejected."

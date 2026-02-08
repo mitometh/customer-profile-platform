@@ -139,15 +139,28 @@ use_cases:
 
   - id: UC-7
     name: Manage Source Integration
-    priority: low
+    priority: medium
     actor: admin
     context: source-integration
-    scope: production
-    assignment_note: Sources seeded; no admin API.
-    trigger: Admin action via API/dashboard
+    scope: both
+    assignment_note: >
+      Full source CRUD implemented: list, detail, register (with auto-generated token),
+      update (name/description/active status), and soft-delete. Redis cache invalidated
+      on deactivation or deletion. Gate 1 + Gate 2 RBAC enforced.
+    trigger: Admin action via API
+    preconditions: [Caller has sources.manage permission (admin role), valid JWT]
     main_flow:
-      1: Register, deactivate, or rotate keys
-      2: Update sources table, invalidate cached tokens
+      1: "List sources (GET /api/sources) — paginated, requires sources.read"
+      2: "View source detail (GET /api/sources/{id}) — requires sources.read"
+      3: "Register source (POST /api/sources) — auto-generates API token, requires sources.manage"
+      4: "Update source (PATCH /api/sources/{id}) — name, description, is_active, requires sources.manage"
+      5: "Delete source (DELETE /api/sources/{id}) — soft-delete, requires sources.manage"
+      6: On deactivation or deletion, invalidate Redis token cache
+    postconditions: [Source state updated, token cache invalidated if needed, webhook auth reflects new state]
+    alternative_flows:
+      UC-7-A: { name: Duplicate Name, condition: "Source name already exists", action: "409 Conflict" }
+      UC-7-B: { name: Not Found, condition: "Source ID does not exist or soft-deleted", action: "404 Not Found" }
+      UC-7-C: { name: Permission Denied, condition: "Caller lacks sources.manage", action: "403 Forbidden" }
 
   - id: UC-8
     name: Authenticate Internal User

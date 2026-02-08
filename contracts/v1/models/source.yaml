@@ -40,7 +40,15 @@ responses:
 
   SourceDetail:
     desc: Full source details for admin views.
-    used_by: GET /api/sources (production)
+    used_by: GET /api/sources/{id}
     fields: [id, name, description, is_active, created_at, updated_at]
     notes:
+      api_token_hash: "NEVER included in any response"
+
+  SourceCreateResult:
+    desc: Returned only at creation time. Includes raw API token (shown once).
+    used_by: POST /api/sources
+    fields: [id, name, api_token, is_active, created_at]
+    notes:
+      api_token: "Raw token shown only at creation. Caller must store securely. Cannot be retrieved again."
       api_token_hash: "NEVER included in any response"

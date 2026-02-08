@@ -1,7 +1,7 @@
 # Customer 360 - Health Check API
 # Infrastructure monitoring endpoint for load balancers and uptime checks.
 
-bounded_context: system
+# Cross-cutting infrastructure — not a domain bounded context
 base_path: /api
 
 endpoints:

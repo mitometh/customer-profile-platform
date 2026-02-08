@@ -1,0 +1,93 @@
+# Customer 360 - Role & Permission Models
+# RBAC infrastructure for DB-driven permission resolution.
+# Role definitions (seed data): see rbac/roles.yaml
+# Permission definitions (seed data): see rbac/permissions.yaml
+
+bounded_context: identity-access
+scope: both
+
+# --- Entities ---
+entities:
+
+  Role:
+    desc: Team-based access level. Seeded with 5 defaults. FK-referenced by users.role_id.
+    table: roles
+    fields:
+      - id:           { type: uuid, immutable: true }
+      - name:         { type: string, max: 50, unique: true, desc: "Machine-readable identifier (natural key)" }
+      - display_name: { type: string, max: 100 }
+      - description:  { type: string, max: 255 }
+      - is_system:    { type: boolean, default: false, desc: "True for seeded roles (sales, support, cs_manager, ops, admin). System roles cannot be deleted." }
+      - created_at:   { type: timestamp, auto: true }
+      - updated_at:   { type: timestamp, auto: true }
+      - deleted_at:   { type: timestamp, nullable: true, indexed: true }
+      - deleted_by:   { type: uuid, nullable: true, ref: "users.id" }
+
+  Permission:
+    desc: Granular access right in resource.action format. Seed-only (no runtime CRUD). FK-referenced by role_permissions.
+    table: permissions
+    write_pattern: seed-only
+    fields:
+      - id:          { type: uuid, immutable: true }
+      - code:        { type: string, max: 50, unique: true, desc: "Permission code, e.g. customers.read" }
+      - description: { type: string, max: 255 }
+
+  RolePermission:
+    desc: Junction table linking roles to permissions. Composite PK enforces uniqueness.
+    table: role_permissions
+    fields:
+      - role_id:       { type: uuid, ref: "roles.id", desc: "FK to roles table" }
+      - permission_id: { type: uuid, ref: "permissions.id", desc: "FK to permissions table" }
+    constraints:
+      primary_key: [role_id, permission_id]
+
+# --- Response Shapes ---
+responses:
+
+  PermissionItem:
+    desc: Permission representation for lists and role detail.
+    fields: [id, code, description]
+    example:
+      id: "660e8400-e29b-41d4-a716-446655440020"
+      code: "customers.read"
+      description: "View customer list and detail profiles"
+
+  RoleSummary:
+    desc: Role representation for lists. Includes permission count but not full permission list.
+    fields: [id, name, display_name, description, is_system, permission_count, created_at]
+    example:
+      id: "770e8400-e29b-41d4-a716-446655440030"
+      name: "cs_manager"
+      display_name: "Customer Success Manager"
+      description: "Full read access to all customer data. Can export."
+      is_system: true
+      permission_count: 6
+      created_at: "2025-01-01T00:00:00Z"
+
+  RoleDetail:
+    desc: Full role representation with resolved permissions.
+    fields: [id, name, display_name, description, is_system, permissions, user_count, created_at, updated_at]
+    example:
+      id: "770e8400-e29b-41d4-a716-446655440030"
+      name: "cs_manager"
+      display_name: "Customer Success Manager"
+      description: "Full read access to all customer data. Can export."
+      is_system: true
+      permissions:
+        - { id: "660e8400-e29b-41d4-a716-446655440020", code: "customers.read", description: "View customer list and detail profiles" }
+        - { id: "660e8400-e29b-41d4-a716-446655440021", code: "customers.export", description: "Export customer data" }
+        - { id: "660e8400-e29b-41d4-a716-446655440022", code: "events.read", description: "View customer activity timeline" }
+        - { id: "660e8400-e29b-41d4-a716-446655440023", code: "metrics.read", description: "View computed metrics for customers" }
+        - { id: "660e8400-e29b-41d4-a716-446655440024", code: "metrics.catalog.read", description: "View metrics catalog definitions" }
+        - { id: "660e8400-e29b-41d4-a716-446655440025", code: "chat.use", description: "Send messages to the AI agent" }
+      user_count: 3
+      created_at: "2025-01-01T00:00:00Z"
+      updated_at: "2025-01-15T10:30:00Z"
+
+# --- Notes ---
+# Roles and permissions are seeded via seeds/seed.py with 5 default roles and 13 permissions.
+# Seeded roles have is_system=true and cannot be deleted (can still be updated).
+# Custom roles can be created, updated, and soft-deleted via the API.
+# FK constraints on role_permissions ensure only valid permissions can be assigned to roles.
+# Permission resolution: user.role_id -> roles -> role_permissions -> permissions.
+# Resolved permissions are cached in Redis (TTL 5min) for performance.

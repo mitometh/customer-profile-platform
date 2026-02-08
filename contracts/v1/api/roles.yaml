@@ -1,0 +1,178 @@
+# Customer 360 - Role & Permission Management API
+# Story refs: US-5.9, US-5.10
+# Full CRUD for roles, permission listing, and role-permission assignment.
+# Permissions are seed-only (no CRUD) — managed via code/migrations.
+# Roles can be created/updated/deleted (custom roles) or updated (system roles).
+
+bounded_context: identity-access
+scope: both
+base_path: /api
+
+endpoints:
+
+  # ============================================================
+  # PERMISSIONS
+  # ============================================================
+
+  # --- GET /api/permissions ---
+  - method: GET
+    path: /permissions
+    summary: List all available permissions
+    story_refs: [US-5.9]
+    auth_required: true
+    required_permission: roles.read
+    desc: >
+      Returns the full list of permissions in the system. Permissions are
+      seed-only and cannot be created/modified via API. Used by admin UI
+      to populate permission checkboxes when editing roles.
+
+    response:
+      200:
+        body:
+          data:
+            type: array
+            items: { ref: "../models/role.yaml#PermissionItem" }
+        example:
+          data:
+            - { id: "660e8400-e29b-41d4-a716-446655440020", code: "customers.read", description: "View customer list and detail profiles" }
+            - { id: "660e8400-e29b-41d4-a716-446655440021", code: "customers.manage", description: "Create, update, and soft-delete customers" }
+      401: { ref: "../models/common.yaml#error_response", desc: "Missing/invalid JWT" }
+      403: { ref: "../models/common.yaml#error_response", desc: "Caller lacks roles.read permission" }
+
+  # ============================================================
+  # ROLES
+  # ============================================================
+
+  # --- GET /api/roles ---
+  - method: GET
+    path: /roles
+    summary: List all roles with permission counts
+    story_refs: [US-5.9]
+    auth_required: true
+    required_permission: roles.read
+
+    request:
+      query_params:
+        - cursor: { type: string, optional: true, desc: "Cursor for keyset pagination" }
+        - limit:  { type: integer, optional: true, default: 20, min: 1, max: 100 }
+
+    response:
+      200:
+        body:
+          data:
+            type: array
+            items: { ref: "../models/role.yaml#RoleSummary" }
+          pagination: { ref: "../models/common.yaml#PaginationMeta" }
+      401: { ref: "../models/common.yaml#error_response", desc: "Missing/invalid JWT" }
+      403: { ref: "../models/common.yaml#error_response", desc: "Caller lacks roles.read permission" }
+
+  # --- GET /api/roles/{id} ---
+  - method: GET
+    path: /roles/{id}
+    summary: Get role detail with full permission list
+    story_refs: [US-5.9]
+    auth_required: true
+    required_permission: roles.read
+
+    request:
+      path_params:
+        - id: { type: uuid }
+
+    response:
+      200:
+        body: { ref: "../models/role.yaml#RoleDetail" }
+      401: { ref: "../models/common.yaml#error_response", desc: "Missing/invalid JWT" }
+      403: { ref: "../models/common.yaml#error_response", desc: "Caller lacks roles.read permission" }
+      404: { ref: "../models/common.yaml#error_response", desc: "Role not found or soft-deleted" }
+
+  # --- POST /api/roles ---
+  - method: POST
+    path: /roles
+    summary: Create a new custom role
+    story_refs: [US-5.10]
+    auth_required: true
+    required_permission: roles.manage
+
+    request:
+      body:
+        - name:         { type: string, required: true, max: 50, pattern: "^[a-z][a-z0-9_]*$", desc: "Machine-readable identifier. Lowercase alphanumeric + underscores." }
+        - display_name: { type: string, required: true, max: 100 }
+        - description:  { type: string, optional: true, max: 255 }
+        - permissions:  { type: "uuid[]", required: true, desc: "Array of permission IDs to assign to this role. At least one required." }
+
+    response:
+      201:
+        body: { ref: "../models/role.yaml#RoleDetail" }
+      400: { ref: "../models/common.yaml#error_response", desc: "Validation error (invalid name format, empty permissions, invalid permission IDs)" }
+      401: { ref: "../models/common.yaml#error_response", desc: "Missing/invalid JWT" }
+      403: { ref: "../models/common.yaml#error_response", desc: "Caller lacks roles.manage permission" }
+      409: { ref: "../models/common.yaml#error_response", desc: "Role name already exists" }
+
+    behavior:
+      is_system: "Always set to false for API-created roles"
+      permission_validation: "All permission IDs must exist in the permissions table. Invalid IDs → 400."
+
+  # --- PATCH /api/roles/{id} ---
+  - method: PATCH
+    path: /roles/{id}
+    summary: Update role details and/or permission assignments
+    story_refs: [US-5.10]
+    auth_required: true
+    required_permission: roles.manage
+
+    request:
+      path_params:
+        - id: { type: uuid }
+      body:
+        - display_name: { type: string, optional: true, max: 100 }
+        - description:  { type: string, optional: true, max: 255 }
+        - permissions:  { type: "uuid[]", optional: true, desc: "Full replacement of role's permission set. At least one required when provided." }
+
+    response:
+      200:
+        body: { ref: "../models/role.yaml#RoleDetail" }
+      400: { ref: "../models/common.yaml#error_response", desc: "Validation error (empty permissions, invalid permission IDs)" }
+      401: { ref: "../models/common.yaml#error_response", desc: "Missing/invalid JWT" }
+      403: { ref: "../models/common.yaml#error_response", desc: "Caller lacks roles.manage permission" }
+      404: { ref: "../models/common.yaml#error_response", desc: "Role not found or soft-deleted" }
+      409: { ref: "../models/common.yaml#error_response", desc: "Role name already exists (if name update supported in future)" }
+
+    behavior:
+      system_roles: >
+        System roles (is_system=true) CAN have their display_name, description,
+        and permissions updated. This allows admins to customize default roles
+        without creating new ones. The name field of system roles cannot be changed.
+      permission_replacement: >
+        When permissions[] is provided, it fully replaces the current permission set.
+        Old role_permissions rows are deleted and new ones inserted (transactional).
+      cache_invalidation: >
+        After permission changes, invalidate Redis permission cache for ALL users
+        with this role_id (keys: user:{user_id}:permissions).
+
+  # --- DELETE /api/roles/{id} ---
+  - method: DELETE
+    path: /roles/{id}
+    summary: Soft-delete a custom role
+    story_refs: [US-5.10]
+    auth_required: true
+    required_permission: roles.manage
+
+    request:
+      path_params:
+        - id: { type: uuid }
+
+    response:
+      204: { desc: "Role soft-deleted. No response body." }
+      400: { ref: "../models/common.yaml#error_response", desc: "Cannot delete system role or role with assigned users" }
+      401: { ref: "../models/common.yaml#error_response", desc: "Missing/invalid JWT" }
+      403: { ref: "../models/common.yaml#error_response", desc: "Caller lacks roles.manage permission" }
+      404: { ref: "../models/common.yaml#error_response", desc: "Role not found or already deleted" }
+
+    behavior:
+      system_role_protection: "System roles (is_system=true) CANNOT be deleted → 400"
+      user_check: >
+        If any active users (deleted_at IS NULL) have this role_id, deletion is
+        blocked → 400 with message listing the count of affected users.
+        Admin must reassign users to another role before deleting.
+      soft_delete: "Sets deleted_at and deleted_by. Role data preserved."
+      cache_invalidation: "Not needed — role already has no users (enforced by user_check)."
