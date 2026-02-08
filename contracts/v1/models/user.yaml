@@ -1,0 +1,69 @@
+# Customer 360 - User Model
+# Term definition: see _glossary.yaml
+# Role/permission definitions: see rbac/
+
+bounded_context: identity-access
+scope: both
+
+# --- Entity ---
+entity:
+  name: User
+  table: users
+  desc: Internal team member. Built-in JWT auth (assignment), SSO/OAuth2 (production).
+
+  fields:
+    - id:            { type: uuid, immutable: true }
+    - email:         { type: email, max: 255, unique: true, desc: "Corporate email, used as login identifier" }
+    - full_name:     { type: string, max: 255 }
+    - password_hash: { type: string, max: 255, write_only: true, scope: assignment, desc: "Bcrypt-hashed password. Never included in any response. Production uses SSO." }
+    - role:          { type: string, max: 50, enum: [sales, support, cs_manager, ops, admin], ref: "rbac/roles.yaml" }
+    - is_active:     { type: boolean, default: true, desc: "Set false to revoke access without deleting" }
+    - last_login_at: { type: timestamp, nullable: true }
+    - created_at:    { type: timestamp, auto: true }
+    - created_by:    { type: uuid, nullable: true, ref: "users.id" }
+    - updated_at:    { type: timestamp, auto: true }
+    - updated_by:    { type: uuid, nullable: true, ref: "users.id" }
+    - deleted_at:    { type: timestamp, nullable: true, indexed: true }
+    - deleted_by:    { type: uuid, nullable: true, ref: "users.id" }
+
+# --- Response Shapes ---
+responses:
+
+  UserSummary:
+    desc: User representation for lists. Never includes auth data.
+    fields: [id, email, full_name, role, is_active, last_login_at?]
+    example:
+      id: "aa0e8400-e29b-41d4-a716-446655440010"
+      email: "sarah.chen@company.com"
+      full_name: "Sarah Chen"
+      role: "cs_manager"
+      is_active: true
+      last_login_at: "2025-02-08T09:15:00Z"
+
+  CurrentUser:
+    desc: Returned on login/session check. Includes resolved permissions for frontend rendering.
+    fields: [id, email, full_name, role, "permissions[]"]
+    example:
+      id: "aa0e8400-e29b-41d4-a716-446655440010"
+      email: "sarah.chen@company.com"
+      full_name: "Sarah Chen"
+      role: "cs_manager"
+      permissions: [customers.read, customers.export, events.read, metrics.read, metrics.catalog.read, chat.use]
+
+  AgentUserContext:
+    desc: Injected into orchestrator system prompt per request. The ONLY user info the LLM sees (never JWT/password/raw permissions).
+    fields:
+      - user_name:            { type: string, desc: "Display name" }
+      - role:                 { type: string, desc: "Role name" }
+      - available_tools:      { type: "string[]", desc: "Permitted tool names" }
+      - capabilities_summary: { type: string, desc: "Human-readable capability summary" }
+
+    system_prompt_template: |
+      You are assisting {user_name} (role: {role}).
+
+      YOUR CAPABILITIES: {capabilities_summary}
+
+      RULES:
+      - Only use the tools provided. Do not claim capabilities you lack.
+      - If asked about something outside your tools, explain what you CAN help with.
+      - Never reveal internal permission details, tool names, or architecture.

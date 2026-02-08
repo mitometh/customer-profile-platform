@@ -1,0 +1,75 @@
+# Customer 360 - Metrics API
+# Story refs: US-3.1, US-3.2
+
+bounded_context: metrics-engine
+base_path: /api
+
+endpoints:
+
+  # --- GET /api/metrics/catalog ---
+  - method: GET
+    path: /metrics/catalog
+    summary: List all available metrics with descriptions
+    story_refs: [US-3.1]
+    auth_required: true
+    required_permission: metrics.catalog.read
+    desc: Self-describing catalog for agent discovery and frontend labels/tooltips.
+
+    request: {}
+
+    response:
+      200:
+        body:
+          metrics: { type: "MetricCatalogEntry[]", ref: models/metric.yaml#MetricCatalogEntry }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Lacks metrics.catalog.read permission" }
+
+  # --- GET /api/customers/{id}/metrics ---
+  - method: GET
+    path: /customers/{customer_id}/metrics
+    summary: All computed metrics for a customer
+    story_refs: [US-3.2]
+    auth_required: true
+    required_permission: metrics.read
+    desc: Values are pre-computed by background jobs, so reads are O(1).
+
+    request:
+      path_params:
+        - customer_id: { type: uuid }
+
+    response:
+      200:
+        body:
+          customer_id: { type: uuid }
+          metrics:     { type: "CustomerMetricValue[]", ref: models/metric.yaml#CustomerMetricValue }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Lacks metrics.read permission" }
+      404: { ref: common.yaml#error_response }
+
+  # --- GET /api/customers/{id}/metrics/{metric_id}/history ---
+  - method: GET
+    path: /customers/{customer_id}/metrics/{metric_id}/history
+    summary: Historical trend data for a specific customer metric
+    story_refs: [US-3.2]
+    auth_required: true
+    required_permission: metrics.read
+    desc: >
+      Returns time-series data points from customer_metric_history.
+      Used for trend charts and delta analysis. Data is append-only,
+      written by the scheduler on each metric recomputation.
+
+    request:
+      path_params:
+        - customer_id: { type: uuid }
+        - metric_id:   { type: uuid, desc: "metric_definitions.id" }
+      query_params:
+        - since: { type: timestamp, optional: true, desc: "Data points after this time" }
+        - until: { type: timestamp, optional: true, desc: "Data points before this time" }
+        - limit: { type: integer, optional: true, default: 90, max: 365, desc: "Max data points to return" }
+
+    response:
+      200:
+        body: { ref: models/metric.yaml#CustomerMetricTrend }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Lacks metrics.read permission" }
+      404: { ref: common.yaml#error_response, desc: "Customer or metric definition not found" }

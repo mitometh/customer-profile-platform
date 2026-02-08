@@ -1,0 +1,113 @@
+# Customer 360 - Metric Model
+# Term definition: see _glossary.yaml
+
+bounded_context: metrics-engine
+
+# --- Entities ---
+entities:
+
+  MetricDefinition:
+    desc: Self-describing metric in the catalog. Used by agent and frontend for discovery and interpretation.
+    table: metric_definitions
+    fields:
+      - id:           { type: uuid, immutable: true }
+      - name:         { type: string, max: 100, unique: true, desc: "Machine-readable identifier (natural key)" }
+      - display_name: { type: string, max: 255 }
+      - description:  { type: string, desc: "Interpretation guidelines for the agent" }
+      - unit:         { type: string, max: 50, examples: [count, score, days, percentage, currency] }
+      - value_type:   { type: enum, ref: common.yaml#metric_value_type }
+      - created_at:   { type: timestamp, auto: true }
+      - created_by:   { type: uuid, nullable: true, ref: "users.id" }
+      - updated_at:   { type: timestamp, auto: true }
+      - updated_by:   { type: uuid, nullable: true, ref: "users.id" }
+      - deleted_at:   { type: timestamp, nullable: true, indexed: true }
+      - deleted_by:   { type: uuid, nullable: true, ref: "users.id" }
+
+  CustomerMetric:
+    desc: Pre-computed metric value for a specific customer. Key-value storage.
+    table: customer_metrics
+    unique_constraint: [customer_id, metric_definition_id]
+    fields:
+      - id:                   { type: uuid, immutable: true }
+      - customer_id:          { type: uuid, indexed: true, ref: "customers.id" }
+      - metric_definition_id: { type: uuid, indexed: true, ref: "metric_definitions.id", desc: "References metric_definitions.id (UUID FK)" }
+      - metric_value:         { type: decimal, precision: 4 }
+      - note:                 { type: string, optional: true, desc: "Context about computation" }
+      - created_at:           { type: timestamp, auto: true }
+      - created_by:           { type: uuid, nullable: true, ref: "users.id" }
+      - updated_at:           { type: timestamp, auto: true }
+      - updated_by:           { type: uuid, nullable: true, ref: "users.id" }
+      - deleted_at:           { type: timestamp, nullable: true, indexed: true }
+      - deleted_by:           { type: uuid, nullable: true, ref: "users.id" }
+
+  CustomerMetricHistory:
+    desc: >
+      Historical snapshot of metric values. Written each time a metric is recomputed.
+      Enables trend analysis, delta comparisons, and time-series charts.
+    table: customer_metric_history
+    write_pattern: append-only
+    indexes:
+      - [customer_id, metric_definition_id, recorded_at]
+    fields:
+      - id:                   { type: uuid, immutable: true }
+      - customer_id:          { type: uuid, indexed: true, ref: "customers.id" }
+      - metric_definition_id: { type: uuid, ref: "metric_definitions.id" }
+      - metric_value:         { type: decimal, precision: 4 }
+      - recorded_at:          { type: timestamp, auto: true, desc: "When this snapshot was taken" }
+
+# --- Response Shapes ---
+responses:
+
+  MetricCatalogEntry:
+    desc: Single metric definition from the catalog endpoint.
+    used_by: GET /api/metrics/catalog
+    fields: [id, name, display_name, description, unit, value_type]
+    example:
+      id: "880e8400-e29b-41d4-a716-446655440030"
+      name: "health_score"
+      display_name: "Customer Health Score"
+      description: >
+        Composite score from 0-100 based on engagement, support ticket
+        frequency, and contract utilization. Above 70 is healthy,
+        below 40 is at-risk.
+      unit: "score"
+      value_type: "decimal"
+
+  CustomerMetricValue:
+    desc: Metric value enriched with its definition, for a specific customer.
+    used_by: "GET /api/customers/{id}/metrics, embedded in CustomerDetail"
+    fields: [metric_definition_id, metric_name, display_name, metric_value, unit, description, note?, updated_at]
+    notes:
+      metric_name: "Resolved from metric_definitions join on metric_definition_id"
+      display_name: "Resolved from metric_definitions join on metric_definition_id"
+      description: "Resolved from metric_definitions join on metric_definition_id"
+      unit: "Resolved from metric_definitions join on metric_definition_id"
+    example:
+      metric_definition_id: "880e8400-e29b-41d4-a716-446655440031"
+      metric_name: "support_tickets_last_30d"
+      display_name: "Support Tickets (Last 30 Days)"
+      metric_value: 3
+      unit: "count"
+      description: "Number of support tickets opened by this customer in the last 30 days."
+      note: "Auto-computed daily"
+      updated_at: "2025-02-07T06:00:00Z"
+
+  CustomerMetricTrend:
+    desc: Time-series data for a specific metric on a specific customer.
+    used_by: "GET /api/customers/{id}/metrics/{metric_id}/history"
+    fields: [metric_definition_id, metric_name, display_name, unit, data_points]
+    embedded:
+      data_points:
+        type: "MetricDataPoint[]"
+        item_fields:
+          metric_value: { type: decimal }
+          recorded_at:  { type: timestamp }
+    example:
+      metric_definition_id: "880e8400-e29b-41d4-a716-446655440031"
+      metric_name: "support_tickets_last_30d"
+      display_name: "Support Tickets (Last 30 Days)"
+      unit: "count"
+      data_points:
+        - { metric_value: 5, recorded_at: "2025-01-01T06:00:00Z" }
+        - { metric_value: 3, recorded_at: "2025-02-01T06:00:00Z" }
+        - { metric_value: 3, recorded_at: "2025-02-07T06:00:00Z" }

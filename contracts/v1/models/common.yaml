@@ -1,0 +1,109 @@
+# Customer 360 - Shared Types & Common Models
+# Shared across all API contracts. Any change here affects the entire platform.
+
+# --- Enumerations ---
+enums:
+
+  event_type:
+    description: Types of customer activity events
+    values: [support_ticket, meeting, usage_event]
+    extensible: true
+
+  metric_value_type:
+    description: Data type of a metric's value for correct rendering
+    values: [integer, decimal, percentage]
+    # Note: boolean was removed. Boolean-like metrics should use integer (0/1)
+    # with unit "flag" — avoids type mismatch with the decimal storage column.
+
+  sort_order:
+    values: [asc, desc]
+
+  message_role:
+    values: [user, assistant]
+
+  role:
+    description: Team-based access level assigned to users
+    values: [sales, support, cs_manager, ops, admin]
+
+# --- Shared Field Types ---
+field_types:
+  uuid:      { type: string, format: uuid, example: "550e8400-e29b-41d4-a716-446655440000" }
+  timestamp: { type: string, format: date-time, example: "2025-01-15T10:30:00Z" }
+  date:      { type: string, format: date, example: "2025-01-15" }
+  currency:  { type: number, format: decimal, precision: 2, example: 150000.00 }
+  email:     { type: string, format: email, example: "contact@acmecorp.com" }
+
+# --- Audit Fields ---
+# Applied to all mutable entities. Immutable entities (Event) use created_by only.
+audit_fields:
+  created_by: { type: uuid, nullable: true, ref: "users.id" }
+  updated_by: { type: uuid, nullable: true, ref: "users.id" }
+
+# --- Soft Delete Fields ---
+# Applied to all entities (including ChatSession). Records are never physically deleted.
+soft_delete_fields:
+  deleted_at: { type: timestamp, nullable: true, indexed: true }
+  deleted_by: { type: uuid, nullable: true, ref: "users.id" }
+
+# --- Field Optionality Conventions ---
+# nullable: true  — column allows NULL in the database (field always present in response, value may be null)
+# optional: true  — field may be omitted from API request payloads (implies nullable at storage layer)
+# field?          — shorthand in response field lists: field is omitted from response when value is null
+
+# --- Pagination ---
+# Cursor-based (keyset) pagination across ALL list endpoints.
+# Why: append-only data + O(1) index seek + consistent frontend pattern.
+# Trade-off: no "jump to page N" — forward-only, acceptable for browse/search patterns.
+
+pagination:
+
+  request:
+    fields:
+      - cursor: { type: string, optional: true, desc: "Opaque cursor from previous response. Omit for first page." }
+      - limit:  { type: integer, optional: true, default: 20, min: 1, max: 100 }
+
+  response:
+    fields:
+      - total:       { type: integer, nullable: true, desc: "Total items matching the query. May be null if expensive to compute. Clients must handle null." }
+      - limit:       { type: integer, desc: "Items per page (echoed from request)" }
+      - has_next:    { type: boolean, desc: "Whether more pages are available" }
+      - next_cursor: { type: string, nullable: true, desc: "Cursor for next page, null if last" }
+    notes:
+      total: >
+        Computing total requires a separate COUNT(*) query which can be slow on large tables.
+        Backends SHOULD return total on the first page request and MAY return null on subsequent pages.
+        Frontends must not depend on total being present — use has_next for pagination control.
+
+# --- Soft Delete Convention ---
+# All queries exclude records where deleted_at IS NOT NULL by default.
+# Detail endpoints return 404 for soft-deleted records.
+# No physical deletes — all deletes are soft. No exceptions.
+
+# --- Error Response ---
+error_response:
+  fields:
+    error:
+      code:    { type: string, examples: [NOT_FOUND, VALIDATION_ERROR, INTERNAL_ERROR, LLM_UNAVAILABLE, RATE_LIMITED] }
+      message: { type: string, example: "Customer with id '123' not found" }
+      details: { type: object, optional: true, desc: "Additional context (e.g., field-level validation errors)" }
+
+  http_status_mapping:
+    400: VALIDATION_ERROR
+    401: UNAUTHORIZED
+    403: FORBIDDEN
+    404: NOT_FOUND
+    429: RATE_LIMITED
+    500: INTERNAL_ERROR
+    503: LLM_UNAVAILABLE
+
+# --- Health Check ---
+health_check:
+  endpoint: GET /api/health
+  response:
+    status:       { type: string, enum: [healthy, degraded, unhealthy] }
+    version:      { type: string }
+    checks:
+      database:       { type: string, enum: [up, down] }
+      llm_provider:   { type: string, enum: [up, down] }
+      redis:          { type: string, enum: [up, down] }
+      message_broker: { type: string, enum: [up, down], desc: "RabbitMQ (dev) / SNS+SQS (production)" }

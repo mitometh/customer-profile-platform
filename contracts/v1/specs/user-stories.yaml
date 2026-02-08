@@ -1,0 +1,324 @@
+# Customer 360 - User Stories
+# Size: S (<1 day) | M (1-2 days) | L (3-5 days) | XL (>5 days)
+# Priority: must-have | should-have | nice-to-have
+# API traceability: API files reference stories via story_refs — no need to duplicate endpoints here.
+
+epics:
+
+  # === EPIC-1: AI-Powered Customer Chat ===
+  - id: EPIC-1
+    name: AI-Powered Customer Chat
+    context: conversational-agent
+    use_cases: [UC-1]
+
+    stories:
+
+      - id: US-1.1
+        title: Ask a factual question about a customer
+        as_a: internal_user
+        i_want: to ask natural language questions about customers
+        so_that: I get accurate answers without manual DB queries
+        priority: must-have
+        size: L
+        acceptance_criteria:
+          - "Exact value with source attribution for valid questions"
+          - "All data points traceable to DB records"
+          - "'I couldn't find...' for non-existent customers — no fabrication"
+
+      - id: US-1.2
+        title: Have a multi-turn conversation
+        as_a: internal_user
+        i_want: to ask follow-ups referencing previous messages
+        so_that: I explore data naturally without repeating context
+        priority: must-have
+        size: M
+        use_case: UC-1-D
+        acceptance_criteria:
+          - "Resolves pronouns ('their') using conversation history"
+          - "Same session_id = full history available to agent"
+
+      - id: US-1.3
+        title: See source evidence alongside answers
+        as_a: internal_user
+        i_want: to see which tables/records the answer came from
+        so_that: I can trust and verify the answer
+        priority: must-have
+        size: S
+        acceptance_criteria:
+          - "Response includes sources[] with table, record IDs, fields used"
+          - "Response includes tool_calls[] showing tools invoked"
+
+      - id: US-1.4
+        title: Handle ambiguous customer matches
+        as_a: internal_user
+        i_want: the system to list all matches when ambiguous
+        so_that: I clarify instead of getting wrong data
+        priority: should-have
+        size: S
+        acceptance_criteria:
+          - "Multiple matches → list all, ask 'Which one?'"
+          - "User clarifies → respond with correct customer's data"
+
+      - id: US-1.5
+        title: Graceful error when service is down
+        as_a: internal_user
+        i_want: clear error messages when AI/DB is unavailable
+        so_that: I know the issue is temporary
+        priority: should-have
+        size: S
+        acceptance_criteria:
+          - "LLM down → friendly error with retry suggestion (no stack trace)"
+          - "DB down → friendly retrieval failure message"
+
+  # === EPIC-2: Customer Data Browsing ===
+  - id: EPIC-2
+    name: Customer Data Browsing
+    context: customer-management
+    use_cases: [UC-2, UC-3, UC-4]
+
+    stories:
+
+      - id: US-2.1
+        title: List all customers with key details
+        as_a: internal_user
+        i_want: paginated list with company, contact, contract value, signup date
+        so_that: I get an overview of our customer base
+        priority: must-have
+        size: M
+        acceptance_criteria:
+          - "Paginated list: id, company_name, contact_name, email, contract_value, currency_code, signup_date, source_name?"
+          - "Pagination metadata: total (nullable), has_next, next_cursor"
+
+      - id: US-2.2
+        title: Search customers by name
+        as_a: internal_user
+        i_want: case-insensitive partial search by company name
+        so_that: I quickly find a specific customer
+        priority: must-have
+        size: S
+        acceptance_criteria:
+          - "'acme' → 'Acme Corp' in results"
+          - "Non-existent name → empty array (not error)"
+
+      - id: US-2.3
+        title: View full customer profile (Customer 360)
+        as_a: internal_user
+        i_want: complete profile with activity and metrics
+        so_that: I understand the full customer relationship
+        priority: must-have
+        size: M
+        acceptance_criteria:
+          - "Valid ID → profile + recent events (last 10) + all metrics"
+          - "Invalid ID → 404 with clear message"
+
+      - id: US-2.4
+        title: View customer activity timeline
+        as_a: internal_user
+        i_want: chronological activity, filterable by type and date range
+        so_that: I understand interaction history
+        priority: should-have
+        size: M
+        acceptance_criteria:
+          - "Events sorted occurred_at desc with source attribution"
+          - "Filter by event_type → only matching type"
+          - "Date range → only events within range"
+
+  # === EPIC-3: Metrics & Insights ===
+  - id: EPIC-3
+    name: Metrics & Insights
+    context: metrics-engine
+    use_cases: [UC-5]
+
+    stories:
+
+      - id: US-3.1
+        title: View metrics catalog
+        as_a: internal_user
+        i_want: all available metrics with descriptions and units
+        so_that: I know what insights the system provides
+        priority: should-have
+        size: S
+        acceptance_criteria:
+          - "All metrics returned with id, name, display_name, description, unit, value_type"
+
+      - id: US-3.2
+        title: View metrics for a specific customer
+        as_a: internal_user
+        i_want: all computed metrics for a customer
+        so_that: I assess health and engagement at a glance
+        priority: should-have
+        size: S
+        acceptance_criteria:
+          - "Values with definitions and updated_at timestamps"
+          - "No metrics → empty array (not error)"
+          - "Historical trend data available via /metrics/{metric_id}/history endpoint"
+
+      - id: US-3.3
+        title: Scheduled metric recomputation
+        as_a: admin
+        i_want: customer metrics to be automatically recalculated daily
+        so_that: metrics stay current without manual intervention
+        priority: should-have
+        size: L
+        scope: both
+        acceptance_criteria:
+          - "Scheduler runs daily metric recalculation for all active customers"
+          - "health_score is computed from engagement, support ticket frequency, and contract utilization (0-100 scale)"
+          - "days_since_last_contact is computed from the most recent event occurred_at"
+          - "support_tickets_last_30d counts support_ticket events in the trailing 30-day window"
+          - "Each recomputation writes a snapshot to customer_metric_history for trend analysis"
+          - "If scheduler fails, metrics retain their last computed values (no data loss)"
+          - "Scheduler logs execution status and duration for monitoring"
+
+  # === EPIC-4: Data Ingestion Pipeline (Production) ===
+  - id: EPIC-4
+    name: Data Ingestion Pipeline
+    context: source-integration
+    use_cases: [UC-6, UC-7]
+    scope: both
+
+    stories:
+
+      - id: US-4.1
+        title: Ingest data via webhook
+        as_a: external_source
+        i_want: to push event data via webhook with API token
+        so_that: data flows into Customer 360 automatically
+        priority: should-have
+        size: L
+        scope: both
+        assignment_note: >
+          Implemented with RabbitMQ fan-out (3 consumers: data-store, metrics, alerts)
+          and Redis-cached token validation. Demonstrates production pipeline pattern.
+        acceptance_criteria:
+          - "Valid token → 202 Accepted, event queued for processing"
+          - "Invalid/revoked token → 401 Unauthorized"
+          - "Inactive source (is_active=false) → 401 Unauthorized"
+          - "Event appears in DB after worker-data processes it"
+          - "Customer metrics recalculated after worker-metrics processes it"
+
+      - id: US-4.2
+        title: Register a new data source
+        as_a: admin
+        i_want: to register a source with auto-generated token
+        so_that: it can start sending data immediately
+        priority: nice-to-have
+        size: M
+        scope: production
+        acceptance_criteria:
+          - "Token generated, source created with is_active=true"
+
+      - id: US-4.3
+        title: Deactivate a data source
+        as_a: admin
+        i_want: to deactivate a source to stop a compromised integration
+        priority: nice-to-have
+        size: S
+        scope: production
+        acceptance_criteria:
+          - "is_active=false → all requests rejected (401), existing data preserved"
+
+  # === EPIC-5: User Management & RBAC ===
+  - id: EPIC-5
+    name: User Management & RBAC
+    context: identity-access
+    use_cases: [UC-8, UC-9]
+    scope: both
+    assignment_note: >
+      Implemented with built-in JWT auth (email+password login endpoint).
+      Production would swap to SSO/OAuth2 — authorization logic is identical.
+
+    stories:
+
+      - id: US-5.1
+        title: Log in and receive JWT
+        as_a: internal_user
+        i_want: to log in and receive a JWT with my role and permissions
+        priority: must-have
+        size: M
+        scope: both
+        assignment_note: "Email+password login. Production: SSO/OAuth2 flow."
+        acceptance_criteria:
+          - "Valid credentials → JWT with role and permissions"
+          - "Invalid credentials → 401 Unauthorized"
+          - "Deactivated user → 401 Unauthorized"
+
+      - id: US-5.2
+        title: See my role and permissions
+        as_a: internal_user
+        i_want: to see my current role and access level
+        priority: should-have
+        size: S
+        scope: both
+        acceptance_criteria:
+          - "Returns profile, role, resolved permissions"
+
+      - id: US-5.3
+        title: UI adapts to my role
+        as_a: internal_user
+        i_want: interface shows only features I can access
+        priority: should-have
+        size: M
+        scope: both
+        acceptance_criteria:
+          - "sales → source/user management hidden"
+          - "admin → all sections visible"
+
+      - id: US-5.4
+        title: Manage internal users
+        as_a: admin
+        i_want: to create, update, and deactivate users
+        so_that: I control platform access
+        priority: must-have
+        size: M
+        scope: both
+        acceptance_criteria:
+          - "Create: email+name+role → user can log in"
+          - "Deactivate: login blocked, data preserved"
+          - "Role change: permissions effective on next request"
+
+      - id: US-5.5
+        title: API enforces permissions on every request
+        as_a: admin
+        i_want: every endpoint to check permissions
+        priority: must-have
+        size: L
+        scope: both
+        acceptance_criteria:
+          - "sales → POST /api/sources = 403"
+          - "support → GET /api/customers = 200"
+          - "Deactivated user → 401"
+
+      - id: US-5.6
+        title: Chat agent respects my permissions
+        as_a: internal_user
+        i_want: agent to only show data my role permits
+        priority: must-have
+        size: L
+        scope: both
+        acceptance_criteria:
+          - "sales asks about sources → 'I don't have access to source management'"
+          - "sales asks about customer → normal response"
+          - "Prompt injection → Gate 1 + Gate 2 block"
+
+      - id: US-5.7
+        title: Agent only sees permitted tools
+        as_a: internal_user
+        i_want: tools filtered by role before LLM call
+        priority: must-have
+        size: M
+        scope: both
+        acceptance_criteria:
+          - "support → [lookup_customer, list_customers, query_events, get_metric]"
+          - "ops → adds [get_metrics_catalog, get_sources_list, get_source_status]"
+
+      - id: US-5.8
+        title: Service layer blocks unauthorized tool calls
+        as_a: admin
+        i_want: every tool call permission-checked at service layer
+        priority: must-have
+        size: M
+        scope: both
+        acceptance_criteria:
+          - "No permission → {error: FORBIDDEN} — no data queried"
+          - "Has permission → executes normally"

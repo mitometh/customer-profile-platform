@@ -1,0 +1,52 @@
+# Customer 360 - Customer Model
+# Term definition: see _glossary.yaml
+
+bounded_context: customer-management
+
+# --- Entity ---
+entity:
+  name: Customer
+  table: customers
+
+  fields:
+    - id:             { type: uuid, immutable: true }
+    - company_name:   { type: string, max: 255, searchable: true, search_type: trigram }
+    - contact_name:   { type: string, max: 255 }
+    - email:          { type: email, max: 255, desc: "Primary contact email. Not unique — multiple contacts may share a corporate email." }
+    - contract_value: { type: currency, desc: "Total contract value" }
+    - currency_code:  { type: string, max: 3, default: "USD", desc: "ISO 4217 currency code" }
+    - signup_date:    { type: date }
+    - source_id:      { type: uuid, nullable: true, ref: "sources.id", desc: "Reference to the originating source system. Null for manually created customers." }
+    - created_at:     { type: timestamp, auto: true }
+    - created_by:     { type: uuid, nullable: true, ref: "users.id" }
+    - updated_at:     { type: timestamp, auto: true }
+    - updated_by:     { type: uuid, nullable: true, ref: "users.id" }
+    - deleted_at:     { type: timestamp, nullable: true, indexed: true }
+    - deleted_by:     { type: uuid, nullable: true, ref: "users.id" }
+
+# --- Response Shapes ---
+responses:
+
+  CustomerSummary:
+    desc: Compact representation for list views and search results.
+    used_by: GET /api/customers
+    fields: [id, company_name, contact_name, email, contract_value, currency_code, signup_date, source_name?]
+    notes:
+      source_name: "Resolved from sources table join — null if source_id is null (manually created)"
+    example:
+      id: "550e8400-e29b-41d4-a716-446655440000"
+      company_name: "Acme Corp"
+      contact_name: "John Smith"
+      email: "john@acmecorp.com"
+      contract_value: 150000.00
+      currency_code: "USD"
+      signup_date: "2024-03-15"
+      source_name: "salesforce"
+
+  CustomerDetail:
+    desc: "Full customer 360 view: profile + recent events + metrics."
+    used_by: GET /api/customers/{id}
+    fields: [id, company_name, contact_name, email, contract_value, currency_code, signup_date, source_name?, created_at, updated_at, recent_events, metrics]
+    embedded:
+      recent_events: { type: "EventSummary[]", ref: event.yaml#EventSummary, desc: "Last 10 events, desc by occurred_at" }
+      metrics:       { type: "CustomerMetricValue[]", ref: metric.yaml#CustomerMetricValue }

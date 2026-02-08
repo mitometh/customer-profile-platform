@@ -1,0 +1,66 @@
+# Customer 360 - Chat API
+# Story refs: US-1.1, US-1.2, US-1.3, US-1.4, US-1.5
+# Agent behavior: see behavior/agent-rules.yaml
+# Permission enforcement: see behavior/permission-enforcement.yaml
+
+bounded_context: conversational-agent
+base_path: /api
+
+endpoints:
+
+  # --- POST /api/chat ---
+  - method: POST
+    path: /chat
+    summary: Send a message to the Customer Insights agent
+    story_refs: [US-1.1, US-1.2, US-1.3, US-1.4, US-1.5]
+    auth_required: true
+    required_permission: chat.use
+
+    request:
+      body:
+        - message:    { type: string, required: true, min: 1, max: 2000, desc: "Natural language message" }
+        - session_id: { type: uuid, optional: true, desc: "Omit for new session; include for multi-turn" }
+
+    response:
+      200:
+        body:
+          session_id: { type: uuid, desc: "Use in subsequent requests for conversation context" }
+          message:
+            role:    { type: string, const: assistant }
+            content: { type: string, desc: "Agent's synthesized response" }
+          sources:
+            type: "Source[]"
+            optional: true
+            desc: "Data provenance — empty for casual messages"
+            item_fields:
+              table:       { type: string, examples: [customers, events, customer_metrics] }
+              record_id:   { type: uuid }
+              fields_used: { type: object }
+          tool_calls:
+            type: "ToolCall[]"
+            optional: true
+            desc: "Transparency into retrieval process"
+            item_fields:
+              tool:         { type: string, examples: [lookup_customer, query_events, get_metric, list_customers] }
+              input:        { type: object }
+              result_count: { type: integer }
+
+        example:
+          session_id: "550e8400-e29b-41d4-a716-446655440000"
+          message:
+            role: assistant
+            content: "Acme Corp has a contract value of $150,000. They signed up on March 15, 2024."
+          sources:
+            - table: customers
+              record_id: "660e8400-e29b-41d4-a716-446655440001"
+              fields_used: { company_name: "Acme Corp", contract_value: 150000.00 }
+          tool_calls:
+            - tool: lookup_customer
+              input: { name: "Acme Corp" }
+              result_count: 1
+
+      400: { ref: common.yaml#error_response, desc: "Invalid request" }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid auth token" }
+      403: { ref: common.yaml#error_response, desc: "Lacks chat.use permission" }
+      429: { ref: common.yaml#error_response, desc: "Rate limit exceeded" }
+      503: { ref: common.yaml#error_response, desc: "LLM provider unavailable" }

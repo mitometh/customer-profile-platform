@@ -1,0 +1,69 @@
+# Customer 360 - Domain Context Map
+# Bounded contexts, actors, and business context.
+
+# --- Business Context ---
+business:
+  vision: Unified Customer 360 with AI chat interface for instant, accurate customer insights via natural language.
+
+  problem_statement: Customer data scattered across CRM, support, meetings, and usage systems. Teams waste time cross-referencing manually.
+
+  value_proposition:
+    - Unified customer data from all sources
+    - Natural language access to insights
+    - Zero-hallucination answers with source citations
+    - Self-describing metrics catalog (scales without prompt changes)
+
+# --- Bounded Contexts ---
+bounded_contexts:
+
+  - name: customer-management
+    description: Core customer profiles from CRM. Owns canonical identity and contract details.
+    aggregates: [Customer]
+    key_operations: [lookup_customer_by_name, list_customers, get_customer_detail]
+
+  - name: activity-tracking
+    description: Append-only event store for all source activities (tickets, meetings, usage).
+    aggregates: [Event]
+    key_operations: [query_events_by_customer, query_events_by_type, query_events_by_time_range]
+
+  - name: metrics-engine
+    description: Pre-computed per-customer KPIs with self-describing catalog. Background-computed, fast reads.
+    aggregates: [CustomerMetric, MetricDefinition]
+    key_operations: [get_metric_for_customer, list_available_metrics, get_metrics_catalog]
+
+  - name: source-integration
+    description: Registry of data sources with token auth. Manages lifecycle (add, deactivate, rotate keys).
+    aggregates: [Source]
+    key_operations: [validate_source_token, register_source, deactivate_source]
+
+  - name: identity-access
+    description: User management and RBAC. Built-in JWT auth (assignment), SSO/OAuth2 (production). Team-based roles, permission resolution.
+    scope: both
+    aggregates: [User, Role, Permission]
+    key_operations: [authenticate_user, get_current_user_permissions, manage_users, assign_role]
+
+  - name: conversational-agent
+    description: Two-agent AI (orchestrator + retriever) for natural language queries.
+    aggregates: [ChatSession]
+    key_operations: [send_message, create_session, get_session_history]
+
+# --- Actors ---
+actors:
+
+  - name: internal_user
+    description: Team member using chat and browsing customer data. Access determined by role.
+    roles: [sales, support, cs_manager, ops]
+    interacts_with: [conversational-agent, customer-management, activity-tracking, metrics-engine, identity-access]
+
+  - name: admin
+    description: Full access. Manages users, roles, sources, config. Inherits all internal_user capabilities.
+    roles: [admin]
+    interacts_with: [conversational-agent, customer-management, activity-tracking, metrics-engine, source-integration, identity-access]
+
+  - name: external_source
+    description: External system (Salesforce, Jira, etc.) pushing data via webhook with per-source API token.
+    interacts_with: [source-integration]
+
+  - name: background_worker
+    description: Automated jobs that consume events and compute/update customer metrics.
+    interacts_with: [activity-tracking, metrics-engine]

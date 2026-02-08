@@ -1,0 +1,64 @@
+# Customer 360 - Agent Behavioral Rules
+# Governs how the AI agent responds.
+# Enforced through system prompt constraints and tool architecture.
+
+rules:
+
+  - id: AB-1
+    rule: Always call a tool before answering data questions
+    enforcement: system_prompt + tool_architecture
+    story_ref: US-1.1
+    desc: No customer data in training set. Tools are the only path to data.
+
+  - id: AB-2
+    rule: Never fabricate data when tools return no results
+    enforcement: system_prompt
+    story_ref: US-1.1
+    desc: "Empty results → respond 'I couldn't find...' — never guess."
+
+  - id: AB-3
+    rule: List all matches for ambiguous queries
+    enforcement: system_prompt
+    story_ref: US-1.4
+    desc: Multiple matches → list all and ask for clarification.
+
+  - id: AB-4
+    rule: Include source attribution in every data response
+    enforcement: response_format
+    story_ref: US-1.3
+    desc: Every data response includes sources[] with table names and record IDs.
+
+  - id: AB-5
+    rule: Casual messages bypass the retriever
+    enforcement: orchestrator_logic
+    use_case_ref: UC-1-A
+    desc: Greetings/thanks handled by orchestrator directly — no tools invoked.
+
+  - id: AB-6
+    rule: Agent only sees tools the user is permitted to use
+    enforcement: tool_injection + service_layer
+    story_ref: US-5.7
+    ref: behavior/permission-enforcement.yaml#gate_1
+    desc: Tool definitions filtered by permissions before LLM call. Can't call what doesn't exist.
+
+  - id: AB-7
+    rule: Service layer enforces permissions on every tool execution
+    enforcement: service_layer
+    story_ref: US-5.8
+    ref: behavior/permission-enforcement.yaml#gate_2
+    desc: Deterministic permission check per tool call. Immune to prompt injection.
+
+  - id: AB-8
+    rule: Permission denial is communicated gracefully
+    enforcement: orchestrator_logic
+    story_ref: US-5.6
+    desc: "Denied calls → friendly message like 'I don't have access to source management for your role.'"
+
+  - id: AB-9
+    rule: Gracefully handle conversation history exceeding context limits
+    enforcement: orchestrator_logic
+    story_ref: US-1.2
+    desc: >
+      When conversation history approaches the LLM context window limit, the orchestrator
+      applies sliding-window truncation of oldest messages while preserving the original
+      query context. The agent never references information from truncated messages.

@@ -1,0 +1,80 @@
+# Customer 360 Insights Agent - Contract Index
+# Version: 1.0.0
+
+contract:
+  name: customer-360-insights-agent
+  version: "1.0.0"
+  status: draft
+  owners:
+    - role: product-owner
+      team: platform
+    - role: tech-lead
+      team: engineering
+
+# --- File Map ---
+files:
+
+  root:
+    _glossary.yaml: Ubiquitous language — single source of truth for all term definitions
+    _index.yaml: This file — manifest and navigation guide
+
+  domain:
+    context-map.yaml: Bounded contexts, actors, and business context
+
+  models:
+    common.yaml: Shared types, enums, pagination, error format
+    customer.yaml: Customer entity and response shapes
+    event.yaml: Event entity and response shapes
+    metric.yaml: MetricDefinition + CustomerMetric + CustomerMetricHistory entities and response shapes
+    user.yaml: User entity and response shapes
+    source.yaml: Source entity and response shapes (external integration systems)
+    session.yaml: ChatSession + ChatMessage entities (internal agent state)
+
+  rbac:
+    roles.yaml: Role definitions with permission sets
+    permissions.yaml: Permission definitions and matrix
+    tool-permission-map.yaml: Maps agent tools to required permissions
+
+  api:
+    auth.yaml: "POST /api/auth/login, GET /api/auth/me, POST /api/users, PATCH /api/users/{id}"
+    customers.yaml: "GET /api/customers, GET /api/customers/{id}"
+    events.yaml: "GET /api/customers/{id}/events"
+    metrics.yaml: "GET /api/metrics/catalog, GET /api/customers/{id}/metrics, GET /api/customers/{id}/metrics/{metric_id}/history"
+    chat.yaml: "POST /api/chat"
+    ingestion.yaml: "POST /hooks/ingest, POST /api/sources, PATCH /api/sources/{id} [production]"
+    health.yaml: "GET /api/health"
+
+  behavior:
+    agent-rules.yaml: Behavioral rules governing AI agent responses
+    permission-enforcement.yaml: Two-gate permission architecture
+
+  specs:
+    use-cases.yaml: Use case flows (UC-1 through UC-9)
+    user-stories.yaml: User stories with acceptance criteria (US-1.x through US-5.x)
+    implementation-order.yaml: Phased delivery plan
+
+# --- Scope Convention ---
+# scope: assignment  → only in assignment (not in production)
+# scope: production  → only in production (not in assignment)
+# scope: both        → implemented in both (possibly different infra)
+# no scope           → implicitly both
+scope:
+  assignment:
+    description: What gets built (Docker Compose, 9 services)
+    includes:
+      - All models (customers, events, metrics, sources, users)
+      - API endpoints (customers/events/metrics/chat/ingestion/auth/health)
+      - Built-in JWT auth (email+password login)
+      - Two-gate RBAC enforcement (Gate 1: tool filtering, Gate 2: service layer)
+      - All 5 roles with permission sets
+      - Agent rules (AB-1 through AB-8)
+      - Webhook ingestion (POST /hooks/ingest) with RabbitMQ fan-out
+      - Redis source token validation cache
+      - Worker consumers (data-store, metrics, alerts)
+      - Scheduler service (daily metric recalculation, health scores, days-since-contact)
+      - User management API
+    excludes: [SSO/OAuth2 (uses email+password), Source CRUD API, Vector search, Batch LLM evaluator]
+
+  production:
+    description: Full features — upgrades from assignment
+    adds: [SSO/OAuth2 (replaces email+password login), SNS/SQS (replaces RabbitMQ), Source CRUD API, Vector search, Batch LLM evaluator, EventBridge Scheduler (replaces APScheduler)]

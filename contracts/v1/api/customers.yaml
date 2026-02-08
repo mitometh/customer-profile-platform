@@ -1,0 +1,49 @@
+# Customer 360 - Customers API
+# Story refs: US-2.1, US-2.2, US-2.3
+
+bounded_context: customer-management
+base_path: /api
+
+endpoints:
+
+  # --- GET /api/customers ---
+  - method: GET
+    path: /customers
+    summary: List customers with optional search and pagination
+    story_refs: [US-2.1, US-2.2]
+    auth_required: true
+    required_permission: customers.read
+    soft_delete: exclude deleted_at IS NOT NULL
+
+    request:
+      query_params:
+        - search: { type: string, optional: true, desc: "Company name (case-insensitive, partial match via trigram)" }
+        - $ref: common.yaml#pagination.request
+
+    response:
+      200:
+        body:
+          data:       { type: "CustomerSummary[]", ref: models/customer.yaml#CustomerSummary }
+          pagination: { ref: common.yaml#pagination.response }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Lacks customers.read permission" }
+
+  # --- GET /api/customers/{id} ---
+  - method: GET
+    path: /customers/{id}
+    summary: Full customer 360 profile with events and metrics
+    story_refs: [US-2.3]
+    auth_required: true
+    required_permission: customers.read
+    soft_delete: return 404 if deleted_at IS NOT NULL
+
+    request:
+      path_params:
+        - id: { type: uuid, desc: "Customer UUID" }
+
+    response:
+      200:
+        body: { ref: models/customer.yaml#CustomerDetail }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Lacks customers.read permission" }
+      404: { ref: common.yaml#error_response }

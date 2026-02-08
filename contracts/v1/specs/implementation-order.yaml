@@ -1,0 +1,25 @@
+# Customer 360 - Implementation Order
+
+phases:
+
+  phase_1:
+    label: Assignment MVP
+    stories: [US-5.1, US-1.1, US-1.2, US-1.3, US-2.1, US-2.3]
+    desc: Built-in JWT auth (prerequisite) + Core chat (multi-turn + source evidence) + customer list/detail.
+
+  phase_2:
+    label: Assignment — RBAC + Ingestion + Polish
+    stories: [US-2.2, US-2.4, US-1.4, US-1.5, US-3.1, US-3.2, US-3.3, US-4.1, US-5.2, US-5.4, US-5.5, US-5.3, US-5.7, US-5.8, US-5.6]
+    desc: >
+      Search, timeline, ambiguous matches, error handling, metrics catalog.
+      Built-in JWT auth (email+password login), user management, two-gate RBAC enforcement.
+      Agent tool filtering by role (Gate 1) + service layer permission check (Gate 2).
+      Role-adaptive frontend UI. Webhook ingestion with RabbitMQ fan-out.
+      Scheduler service for daily metric recalculation.
+
+  phase_3:
+    label: Production Upgrades
+    stories: [US-4.2, US-4.3]
+    desc: >
+      Source CRUD API, SSO/OAuth2 swap, SNS/SQS swap, vector search, batch LLM evaluator.
+      Most auth/RBAC already done in phase 2 — production only changes the auth provider.

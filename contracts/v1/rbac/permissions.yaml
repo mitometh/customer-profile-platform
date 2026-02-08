@@ -1,0 +1,31 @@
+# Customer 360 - Permission Definitions
+# Format: resource.action
+
+permissions:
+
+  customers:
+    - customers.read:    View customer list and detail profiles
+    - customers.export:  Export customer data (CSV, reports) [future — no endpoint yet]
+
+  events:
+    - events.read:                View customer activity timeline
+
+  metrics:
+    - metrics.read:          View computed metrics for customers
+    - metrics.catalog.read:  View metrics catalog definitions
+    - metrics.catalog.manage: Add/edit/remove metric definitions [future — no endpoint yet]
+
+  sources:
+    - sources.read:   View registered sources and their status
+    - sources.manage: Register, deactivate, rotate keys
+
+  users:
+    - users.read:   View user list and role assignments
+    - users.manage: Create, update, deactivate users and assign roles
+
+  chat:
+    - chat.use: Send messages to the AI agent
+
+  system:
+    - system.health.read: View system health and diagnostics
+    # system.config.manage: Deferred — no endpoint or story defined yet. Re-add when config management feature is designed.

@@ -1,0 +1,63 @@
+# Customer 360 - Event Model
+# Term definition: see _glossary.yaml
+
+bounded_context: activity-tracking
+
+# --- Entity ---
+entity:
+  name: Event
+  table: events
+  write_pattern: append-with-logical-delete
+  # Events are immutable business facts. Once created, they are never updated.
+  # Soft deletion (deleted_at/deleted_by) is supported for compliance and data-correction workflows.
+  # No updated_at/updated_by — append-only means no mutations.
+
+  fields:
+    - id:          { type: uuid, immutable: true }
+    - customer_id: { type: uuid, indexed: true, ref: "customers.id" }
+    - source_id:   { type: uuid, ref: "sources.id" }
+    - event_type:  { type: enum, ref: common.yaml#event_type, indexed: true }
+    - title:       { type: string, max: 255 }
+    - description: { type: string, optional: true }
+    - occurred_at: { type: timestamp, indexed: true, sort_default: desc }
+    - data:        { type: jsonb, optional: true, desc: "Source-specific payload, varies by event_type" }
+    - created_at:  { type: timestamp, auto: true }
+    - created_by:  { type: uuid, nullable: true, ref: "users.id" }
+    - deleted_at:  { type: timestamp, nullable: true, indexed: true }
+    - deleted_by:  { type: uuid, nullable: true, ref: "users.id" }
+
+  indexes:
+    - [customer_id, occurred_at DESC]
+    - [customer_id, event_type, occurred_at DESC]
+
+  data_examples:
+    support_ticket: { priority: high, status: open, resolution_time_hours: null }
+    meeting:        { attendees: ["john@acme.com", "sarah@us.com"], action_items: ["Follow up on API docs"] }
+    usage_event:    { feature: "dashboard", action: "export_report", count: 15 }
+
+# --- Response Shapes ---
+responses:
+
+  EventSummary:
+    desc: Compact event for timelines and lists.
+    used_by: "GET /api/customers/{id}/events, embedded in CustomerDetail"
+    fields: [id, event_type, title, description?, occurred_at, source_name, data?]
+    notes:
+      source_name: "Resolved from sources table join"
+    example:
+      id: "660e8400-e29b-41d4-a716-446655440001"
+      event_type: "support_ticket"
+      title: "API rate limiting issue"
+      description: "Customer reports hitting rate limits on /search during peak hours."
+      occurred_at: "2025-01-20T14:30:00Z"
+      source_name: "jira"
+      data: { priority: "high", status: "open" }
+
+# --- Query Filters ---
+query_filters:
+  - customer_id: { type: uuid, required: true }
+  - event_type:  { type: enum, ref: common.yaml#event_type, optional: true }
+  - since:       { type: timestamp, optional: true, desc: "Events after this time. Agent supports relative: '30d', '7d'." }
+  - until:       { type: timestamp, optional: true, desc: "Events before this time" }
+  - sort:        { type: string, optional: true, default: occurred_at }
+  - order:       { type: enum, ref: common.yaml#sort_order, default: desc }
