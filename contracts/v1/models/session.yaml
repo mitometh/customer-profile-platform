@@ -11,6 +11,7 @@ entity:
   fields:
     - id:              { type: uuid, immutable: true }
     - user_id:         { type: uuid, indexed: true, ref: "users.id" }
+    - title:           { type: string, nullable: true, desc: "Optional session title for display" }
     - last_message_at: { type: timestamp }
     - message_count:   { type: integer, default: 0 }
     - is_active:       { type: boolean, default: true, desc: "false when session is expired or closed" }

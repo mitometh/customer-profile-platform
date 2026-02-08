@@ -59,10 +59,10 @@ class CustomerMetricValueSchema(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    metric_id: UUID
+    metric_definition_id: UUID
     metric_name: str
     display_name: str
-    value: Decimal
+    metric_value: Decimal
     unit: str | None = None
     description: str | None = None
     value_type: str
@@ -92,7 +92,7 @@ class CustomerMetricTrendSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     customer_id: UUID
-    metric_id: UUID
+    metric_definition_id: UUID
     metric_name: str
     display_name: str
     unit: str | None = None

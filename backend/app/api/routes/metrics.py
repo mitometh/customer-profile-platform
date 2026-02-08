@@ -169,10 +169,10 @@ async def get_customer_metrics(
         customer_id=customer_id,
         metrics=[
             CustomerMetricValueSchema(
-                metric_id=m.metric_id,
+                metric_definition_id=m.metric_definition_id,
                 metric_name=m.metric_name,
                 display_name=m.display_name,
-                value=m.value,
+                metric_value=m.metric_value,
                 unit=m.unit,
                 description=m.description,
                 value_type=m.value_type,
@@ -214,9 +214,9 @@ async def get_customer_metric_history(
     )
     return CustomerMetricTrendSchema(
         customer_id=trend.customer_id,
-        metric_id=trend.metric_id,
+        metric_definition_id=trend.metric_definition_id,
         metric_name=trend.metric_name,
         display_name=trend.display_name,
         unit=trend.unit,
-        data_points=[TrendPointSchema(metric_value=dp.value, recorded_at=dp.recorded_at) for dp in trend.data_points],
+        data_points=[TrendPointSchema(metric_value=dp.metric_value, recorded_at=dp.recorded_at) for dp in trend.data_points],
     )

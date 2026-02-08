@@ -163,8 +163,15 @@ epics:
         scope: both
         acceptance_criteria:
           - "Scheduler runs daily metric recalculation for all active customers"
-          - "health_score is computed from engagement, support ticket frequency, and contract utilization (0-100 scale)"
-          - "days_since_last_contact is computed from the most recent event occurred_at"
+          - >-
+            health_score formula (0-100 scale):
+            Base score = 70.
+            +10 if any 'meeting' event occurred in the last 30 days.
+            +10 if any 'usage_event' occurred in the last 30 days.
+            -5 per 'support_ticket' event in the last 30 days (uncapped).
+            -10 if no events of any type in the last 14 days.
+            Result clamped to [0, 100].
+          - "days_since_last_contact is computed from the most recent event occurred_at; 9999 if no events exist"
           - "support_tickets_last_30d counts support_ticket events in the trailing 30-day window"
           - "Each recomputation writes a snapshot to customer_metric_history for trend analysis"
           - "If scheduler fails, metrics retain their last computed values (no data loss)"

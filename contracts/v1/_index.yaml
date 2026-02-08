@@ -41,7 +41,7 @@ files:
     customers.yaml: "GET /api/customers, GET /api/customers/{id}, POST /api/customers, PATCH /api/customers/{id}, DELETE /api/customers/{id}"
     events.yaml: "GET /api/customers/{id}/events"
     metrics.yaml: "GET /api/metrics/catalog, POST /api/metrics/catalog, PATCH /api/metrics/catalog/{id}, DELETE /api/metrics/catalog/{id}, GET /api/customers/{id}/metrics, GET /api/customers/{id}/metrics/{metric_id}/history"
-    chat.yaml: "POST /api/chat"
+    chat.yaml: "POST /api/chat, GET /api/chat/sessions, GET /api/chat/sessions/{session_id}"
     ingestion.yaml: "POST /hooks/ingest"
     sources.yaml: "GET /api/sources, GET /api/sources/{id}, POST /api/sources, PATCH /api/sources/{id}, DELETE /api/sources/{id}"
     roles.yaml: "GET /api/roles, GET /api/roles/{id}, POST /api/roles, PATCH /api/roles/{id}, DELETE /api/roles/{id}, GET /api/permissions"

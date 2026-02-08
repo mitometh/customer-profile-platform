@@ -71,10 +71,10 @@ class MetricQueryService:
         metrics = await self._metric_repo.get_for_customer(customer_id)
         return [
             CustomerMetricDTO(
-                metric_id=m.metric_definition_id,
+                metric_definition_id=m.metric_definition_id,
                 metric_name=m.metric_definition.name,
                 display_name=m.metric_definition.display_name,
-                value=m.metric_value,
+                metric_value=m.metric_value,
                 unit=m.metric_definition.unit,
                 description=m.metric_definition.description,
                 value_type=m.metric_definition.value_type,
@@ -122,7 +122,7 @@ class MetricQueryService:
 
         data_points = [
             TrendPointDTO(
-                value=h.metric_value,
+                metric_value=h.metric_value,
                 recorded_at=h.recorded_at,
             )
             for h in history
@@ -130,7 +130,7 @@ class MetricQueryService:
 
         return CustomerMetricTrendDTO(
             customer_id=customer_id,
-            metric_id=metric_id,
+            metric_definition_id=metric_id,
             metric_name=definition.name,
             display_name=definition.display_name,
             unit=definition.unit,

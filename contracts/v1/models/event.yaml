@@ -41,7 +41,7 @@ responses:
   EventSummary:
     desc: Compact event for timelines and lists.
     used_by: "GET /api/customers/{id}/events, embedded in CustomerDetail"
-    fields: [id, event_type, title, description?, occurred_at, source_name, data?]
+    fields: [id, customer_id?, event_type, title, description?, occurred_at, source_name, data?]
     notes:
       source_name: "Resolved from sources table join"
     example:

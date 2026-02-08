@@ -1,5 +1,7 @@
 """Chat route for the conversational agent context."""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,12 +11,15 @@ from app.api.schemas.chat import (
     ChatRequest,
     ChatResponse,
     MessageSchema,
+    SessionDetailSchema,
+    SessionMessageSchema,
+    SessionSummarySchema,
     SourceAttributionSchema,
     ToolCallSchema,
 )
 from app.application.services.chat import ChatService
 from app.config import get_settings
-from app.core.exceptions import RateLimitedError
+from app.core.exceptions import NotFoundError, RateLimitedError
 from app.infrastructure.cache import get_redis
 from app.infrastructure.repositories.chat import SqlAlchemyChatSessionRepository
 
@@ -88,5 +93,85 @@ async def chat(
                 result_count=tc.result_count,
             )
             for tc in dto.tool_calls
+        ],
+    )
+
+
+@router.get("/sessions", response_model=list[SessionSummarySchema])
+async def list_sessions(
+    user: CurrentUserDTO = Depends(require_permission("chat.use")),
+    db: AsyncSession = Depends(get_db),
+) -> list[SessionSummarySchema]:
+    """List the current user's chat sessions, most recent first."""
+    chat_repo = SqlAlchemyChatSessionRepository(db)
+    sessions = await chat_repo.get_user_sessions(user.id, limit=50)
+    return [
+        SessionSummarySchema(
+            id=s.id,
+            title=s.title,
+            message_count=s.message_count,
+            last_message_at=s.last_message_at,
+            created_at=s.created_at,
+        )
+        for s in sessions
+    ]
+
+
+@router.get("/sessions/{session_id}", response_model=SessionDetailSchema)
+async def get_session(
+    session_id: UUID,
+    user: CurrentUserDTO = Depends(require_permission("chat.use")),
+    db: AsyncSession = Depends(get_db),
+) -> SessionDetailSchema:
+    """Get a specific chat session with all messages. Only the owning user can access it."""
+    chat_repo = SqlAlchemyChatSessionRepository(db)
+    session = await chat_repo.get_with_messages(session_id)
+    if session is None or session.user_id != user.id:
+        raise NotFoundError("ChatSession", session_id)
+
+    sorted_messages = sorted(session.messages, key=lambda m: m.created_at)
+
+    def _parse_sources(raw: list | dict | None) -> list[SourceAttributionSchema]:
+        if not raw:
+            return []
+        items = raw if isinstance(raw, list) else [raw]
+        return [
+            SourceAttributionSchema(
+                table=s.get("table", ""),
+                record_id=s.get("record_id", ""),
+                fields_used=s.get("fields_used", {}),
+            )
+            for s in items
+        ]
+
+    def _parse_tool_calls(raw: list | dict | None) -> list[ToolCallSchema]:
+        if not raw:
+            return []
+        items = raw if isinstance(raw, list) else [raw]
+        return [
+            ToolCallSchema(
+                tool=tc.get("tool", ""),
+                input=tc.get("input", {}),
+                result_count=tc.get("result_count"),
+            )
+            for tc in items
+        ]
+
+    return SessionDetailSchema(
+        id=session.id,
+        title=session.title,
+        message_count=session.message_count,
+        last_message_at=session.last_message_at,
+        created_at=session.created_at,
+        messages=[
+            SessionMessageSchema(
+                id=m.id,
+                role=m.role,
+                content=m.content,
+                sources=_parse_sources(m.sources),
+                tool_calls=_parse_tool_calls(m.tool_calls),
+                created_at=m.created_at,
+            )
+            for m in sorted_messages
         ],
     )

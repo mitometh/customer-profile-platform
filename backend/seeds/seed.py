@@ -3,7 +3,7 @@
 Usage: python -m seeds.seed
 
 Seeds the database with:
-- 14 permissions
+- 15 permissions
 - 5 roles with role-permission mappings
 - 6 users (1 admin + 1 per role)
 - 2 sources
@@ -44,6 +44,7 @@ from app.infrastructure.security import hash_password
 
 ALL_PERMISSIONS = [
     ("customers.read", "View customer list and detail profiles"),
+    ("customers.manage", "Create, update, and soft-delete customers"),
     ("customers.export", "Export customer data (CSV, reports)"),
     ("events.read", "View customer activity timeline"),
     ("metrics.read", "View computed metrics for customers"),
@@ -311,7 +312,7 @@ def _random_dt_in_last_n_days(n: int) -> datetime:
 
 
 async def _seed_permissions(session: AsyncSession) -> dict[str, PermissionModel]:
-    """Seed the 14 permissions. Returns a code->model mapping."""
+    """Seed the 15 permissions. Returns a code->model mapping."""
     perm_map: dict[str, PermissionModel] = {}
     for code, description in ALL_PERMISSIONS:
         perm = PermissionModel(id=uuid4(), code=code, description=description)
