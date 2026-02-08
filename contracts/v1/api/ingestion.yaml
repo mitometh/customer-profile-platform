@@ -1,11 +1,10 @@
 # Customer 360 - Ingestion API
-# Story refs: US-4.1, US-4.2, US-4.3
+# Story refs: US-4.1
 # POST /hooks/ingest is implemented in assignment (RabbitMQ fan-out).
-# Source CRUD (POST/PATCH /api/sources) remains production-only — sources are seeded.
+# Source CRUD endpoints are defined separately in sources.yaml.
 
 bounded_context: source-integration
 # Note: Webhook endpoint uses /hooks prefix (not /api) — intentionally separate from the authenticated API.
-# Source CRUD endpoints (production-only) use /api prefix, hardcoded in their paths.
 
 endpoints:
 
@@ -15,6 +14,7 @@ endpoints:
     summary: Receive data from external source via webhook
     story_refs: [US-4.1]
     scope: both
+    auth_required: false  # Uses X-Source-Token header, not JWT
     desc: >
       Single endpoint for all sources. Validates token (Redis-cached), publishes to
       message broker (RabbitMQ in dev, SNS in production), returns 202.
@@ -41,39 +41,3 @@ endpoints:
       202: { body: { status: "accepted", event_id: { type: uuid } } }
       401: { ref: common.yaml#error_response, desc: "Invalid/revoked token" }
       400: { ref: common.yaml#error_response, desc: "Malformed payload" }
-
-  # --- POST /api/sources ---
-  - method: POST
-    path: /api/sources
-    summary: Register a new data source
-    story_refs: [US-4.2]
-    scope: production
-    auth: admin
-
-    request:
-      body:
-        - name:        { type: string, required: true, max: 100 }
-        - description: { type: string, optional: true }
-
-    response:
-      201:
-        body: { id: uuid, name: string, api_token: string, is_active: boolean, created_at: timestamp }
-        note: "api_token shown only at creation — source must store securely"
-
-  # --- PATCH /api/sources/{id} ---
-  - method: PATCH
-    path: /api/sources/{id}
-    summary: Activate/deactivate a source
-    story_refs: [US-4.3]
-    scope: production
-    auth: admin
-
-    request:
-      path_params:
-        - id: { type: uuid }
-      body:
-        - is_active: { type: boolean, optional: true, desc: "false = reject all future requests" }
-
-    response:
-      200: { desc: "Source updated" }
-      404: { ref: common.yaml#error_response }

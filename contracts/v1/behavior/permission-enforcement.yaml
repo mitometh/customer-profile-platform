@@ -29,6 +29,33 @@ two_channels:
 
   convergence: Service layer is the ONLY convergence point. LLM cannot influence user_context.
 
+# --- Auth Middleware (Blanket Gate) ---
+auth_middleware:
+  name: AuthMiddleware
+  layer: middleware
+  location: app/api/middleware.py
+  purpose: >
+    Defense-in-depth blanket gate. Validates JWT on every /api/ request before
+    route handlers execute. Ensures unauthenticated requests are rejected even if
+    a route handler omits require_permission().
+  public_paths:
+    - path: /api/auth/login
+      reason: Login endpoint — returns JWT, cannot require one
+    - path: /api/health
+      reason: Infrastructure monitoring — must be accessible without auth
+    - path: "/hooks/*"
+      reason: Webhook ingestion — uses X-Source-Token header, not JWT
+    - path: "/docs, /redoc, /openapi.json"
+      reason: OpenAPI documentation UI
+  behavior:
+    valid_jwt: Request passes through to route handlers (Gate 1 + Gate 2)
+    missing_jwt: "Returns 401 {error: {code: UNAUTHORIZED, message: 'Authentication required'}}"
+    invalid_jwt: "Returns 401 {error: {code: UNAUTHORIZED, message: 'Invalid or expired token'}}"
+  security_note: >
+    NOT the authorization boundary (that is Gate 2). This gate only validates
+    authentication (is the caller who they claim to be?). Permission checks
+    happen in Gate 1 (route dependencies) and Gate 2 (service layer).
+
 # --- Gate 1: Tool Injection (Soft Gate) ---
 gate_1:
   name: Tool Injection

@@ -26,9 +26,10 @@ roles:
 
   - name: admin
     display_name: Administrator
-    desc: Full platform access. Only role that can manage users and sources.
+    desc: Full platform access. Only role that can manage users, sources, roles, and customers.
     permissions:
       - customers.read
+      - customers.manage
       - customers.export
       - events.read
       - metrics.read
@@ -38,6 +39,8 @@ roles:
       - sources.manage
       - users.read
       - users.manage
+      - roles.read
+      - roles.manage
       - chat.use
       - system.health.read
 
@@ -45,6 +48,7 @@ roles:
 # Resource              | sales | support | cs_mgr | ops   | admin |
 # ----------------------|-------|---------|--------|-------|-------|
 # customers.read        |   Y   |    Y    |   Y    |   Y   |   Y   |
+# customers.manage      |       |         |        |       |   Y   |
 # customers.export      |       |         |   Y    |       |   Y   |
 # events.read           |   Y   |    Y    |   Y    |   Y   |   Y   |
 # metrics.read          |   Y   |    Y    |   Y    |   Y   |   Y   |
@@ -54,5 +58,7 @@ roles:
 # sources.manage        |       |         |        |       |   Y   |
 # users.read            |       |         |        |       |   Y   |
 # users.manage          |       |         |        |       |   Y   |
+# roles.read            |       |         |        |       |   Y   |
+# roles.manage          |       |         |        |       |   Y   |
 # chat.use              |   Y   |    Y    |   Y    |   Y   |   Y   |
 # system.health.read    |       |         |        |   Y   |   Y   |

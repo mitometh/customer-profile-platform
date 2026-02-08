@@ -46,6 +46,76 @@ endpoints:
       403: { ref: common.yaml#error_response, desc: "Lacks metrics.read permission" }
       404: { ref: common.yaml#error_response }
 
+  # --- POST /api/metrics/catalog ---
+  - method: POST
+    path: /metrics/catalog
+    summary: Create a new metric definition (admin only)
+    story_refs: []
+    auth_required: true
+    required_permission: metrics.catalog.manage
+    desc: Add a new metric definition to the catalog.
+
+    request:
+      body:
+        - name:         { type: string, required: true, max: 100, desc: "Machine-readable identifier (unique)" }
+        - display_name: { type: string, required: true, max: 255 }
+        - description:  { type: string, optional: true }
+        - unit:         { type: string, optional: true, max: 50, examples: [count, score, days, percentage, currency] }
+        - value_type:   { type: enum, required: true, ref: common.yaml#metric_value_type }
+
+    response:
+      201:
+        body: { ref: models/metric.yaml#MetricCatalogEntry }
+      400: { ref: common.yaml#error_response, desc: "Validation error (missing required fields)" }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Lacks metrics.catalog.manage permission" }
+      409: { ref: common.yaml#error_response, desc: "Metric name already exists" }
+
+  # --- PATCH /api/metrics/catalog/{id} ---
+  - method: PATCH
+    path: /metrics/catalog/{id}
+    summary: Update a metric definition (admin only)
+    story_refs: []
+    auth_required: true
+    required_permission: metrics.catalog.manage
+    soft_delete: return 404 if deleted_at IS NOT NULL
+
+    request:
+      path_params:
+        - id: { type: uuid, desc: "MetricDefinition UUID" }
+      body:
+        - display_name: { type: string, optional: true, max: 255 }
+        - description:  { type: string, optional: true }
+        - unit:         { type: string, optional: true, max: 50 }
+        - value_type:   { type: enum, optional: true, ref: common.yaml#metric_value_type }
+
+    response:
+      200:
+        body: { ref: models/metric.yaml#MetricCatalogEntry }
+      400: { ref: common.yaml#error_response, desc: "Validation error" }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Lacks metrics.catalog.manage permission" }
+      404: { ref: common.yaml#error_response }
+
+  # --- DELETE /api/metrics/catalog/{id} ---
+  - method: DELETE
+    path: /metrics/catalog/{id}
+    summary: Soft-delete a metric definition (admin only)
+    story_refs: []
+    auth_required: true
+    required_permission: metrics.catalog.manage
+    soft_delete: set deleted_at, return 204
+
+    request:
+      path_params:
+        - id: { type: uuid, desc: "MetricDefinition UUID" }
+
+    response:
+      204: { desc: "Metric definition soft-deleted successfully (no body)" }
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid JWT" }
+      403: { ref: common.yaml#error_response, desc: "Lacks metrics.catalog.manage permission" }
+      404: { ref: common.yaml#error_response }
+
   # --- GET /api/customers/{id}/metrics/{metric_id}/history ---
   - method: GET
     path: /customers/{customer_id}/metrics/{metric_id}/history

@@ -13,10 +13,13 @@ entity:
     - company_name:   { type: string, max: 255, searchable: true, search_type: trigram }
     - contact_name:   { type: string, max: 255 }
     - email:          { type: email, max: 255, desc: "Primary contact email. Not unique — multiple contacts may share a corporate email." }
+    - phone:          { type: string, max: 50, nullable: true, desc: "Contact phone number" }
+    - industry:       { type: string, max: 100, nullable: true, desc: "Industry classification" }
     - contract_value: { type: currency, desc: "Total contract value" }
     - currency_code:  { type: string, max: 3, default: "USD", desc: "ISO 4217 currency code" }
     - signup_date:    { type: date }
     - source_id:      { type: uuid, nullable: true, ref: "sources.id", desc: "Reference to the originating source system. Null for manually created customers." }
+    - notes:          { type: text, nullable: true, desc: "Free-form notes about the customer" }
     - created_at:     { type: timestamp, auto: true }
     - created_by:     { type: uuid, nullable: true, ref: "users.id" }
     - updated_at:     { type: timestamp, auto: true }

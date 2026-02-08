@@ -5,6 +5,7 @@ permissions:
 
   customers:
     - customers.read:    View customer list and detail profiles
+    - customers.manage:  Create, update, and soft-delete customers
     - customers.export:  Export customer data (CSV, reports) [future — no endpoint yet]
 
   events:
@@ -13,7 +14,7 @@ permissions:
   metrics:
     - metrics.read:          View computed metrics for customers
     - metrics.catalog.read:  View metrics catalog definitions
-    - metrics.catalog.manage: Add/edit/remove metric definitions [future — no endpoint yet]
+    - metrics.catalog.manage: Add/edit/remove metric definitions
 
   sources:
     - sources.read:   View registered sources and their status
@@ -25,6 +26,10 @@ permissions:
 
   chat:
     - chat.use: Send messages to the AI agent
+
+  roles:
+    - roles.read:   View roles and their permission assignments
+    - roles.manage: Create, update, delete roles and assign/remove permissions
 
   system:
     - system.health.read: View system health and diagnostics

@@ -202,21 +202,60 @@ epics:
         as_a: admin
         i_want: to register a source with auto-generated token
         so_that: it can start sending data immediately
-        priority: nice-to-have
+        priority: should-have
         size: M
-        scope: production
+        scope: both
         acceptance_criteria:
-          - "Token generated, source created with is_active=true"
+          - "POST /api/sources with name + optional description → 201"
+          - "Token generated via secrets.token_urlsafe(32), SHA256-hashed for storage"
+          - "Raw api_token returned only in creation response — never again"
+          - "Source created with is_active=true by default"
+          - "Duplicate name → 409 Conflict"
+          - "Requires sources.manage permission (admin only)"
 
       - id: US-4.3
-        title: Deactivate a data source
+        title: Update or deactivate a data source
         as_a: admin
-        i_want: to deactivate a source to stop a compromised integration
+        i_want: to update source details or deactivate a compromised integration
+        so_that: I can manage source lifecycle without deleting data
+        priority: should-have
+        size: S
+        scope: both
+        acceptance_criteria:
+          - "PATCH /api/sources/{id} with name, description, or is_active → 200"
+          - "is_active=false → all future webhook requests rejected (401), existing data preserved"
+          - "Redis token cache invalidated when is_active changes"
+          - "Duplicate name on rename → 409 Conflict"
+          - "Requires sources.manage permission (admin only)"
+
+      - id: US-4.4
+        title: List and view data sources
+        as_a: ops
+        i_want: to see all registered sources and their status
+        so_that: I can monitor the ingestion pipeline
+        priority: should-have
+        size: S
+        scope: both
+        acceptance_criteria:
+          - "GET /api/sources → paginated list of SourceSummary (id, name, description, is_active, created_at)"
+          - "GET /api/sources/{id} → SourceDetail with updated_at"
+          - "api_token_hash NEVER included in any response"
+          - "Requires sources.read permission (ops, admin)"
+
+      - id: US-4.5
+        title: Delete a data source
+        as_a: admin
+        i_want: to remove a source that is no longer needed
+        so_that: it no longer appears in source listings
         priority: nice-to-have
         size: S
-        scope: production
+        scope: both
         acceptance_criteria:
-          - "is_active=false → all requests rejected (401), existing data preserved"
+          - "DELETE /api/sources/{id} → 204 No Content"
+          - "Soft-delete (sets deleted_at, deleted_by) — data preserved"
+          - "Redis token cache invalidated on delete"
+          - "Deleted source excluded from list and webhook validation"
+          - "Requires sources.manage permission (admin only)"
 
   # === EPIC-5: User Management & RBAC ===
   - id: EPIC-5
@@ -322,3 +361,34 @@ epics:
         acceptance_criteria:
           - "No permission → {error: FORBIDDEN} — no data queried"
           - "Has permission → executes normally"
+
+      - id: US-5.9
+        title: View roles and permissions
+        as_a: admin
+        i_want: to view all roles with their permission assignments and list all available permissions
+        so_that: I understand the current access control configuration
+        priority: should-have
+        size: S
+        scope: both
+        acceptance_criteria:
+          - "GET /api/roles → paginated list of RoleSummary (id, name, display_name, description, is_system, permission_count)"
+          - "GET /api/roles/{id} → RoleDetail with full permissions[] and user_count"
+          - "GET /api/permissions → full list of all available permissions"
+          - "Requires roles.read permission (admin only)"
+
+      - id: US-5.10
+        title: Manage roles and permission assignments
+        as_a: admin
+        i_want: to create custom roles, update role permissions, and delete unused custom roles
+        so_that: I can tailor access control to organizational needs
+        priority: should-have
+        size: M
+        scope: both
+        acceptance_criteria:
+          - "POST /api/roles with name, display_name, permissions[] → 201 with new custom role"
+          - "PATCH /api/roles/{id} with display_name, description, or permissions[] → 200"
+          - "System roles (is_system=true) can be updated but not deleted"
+          - "DELETE /api/roles/{id} → 204 for custom roles with no assigned users"
+          - "DELETE blocked if role has assigned users → 400 with user count"
+          - "Permission changes invalidate Redis cache for all affected users"
+          - "Requires roles.manage permission (admin only)"
