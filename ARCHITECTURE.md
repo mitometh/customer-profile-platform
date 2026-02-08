@@ -75,7 +75,7 @@ The assignment implements the production architecture using Docker-friendly equi
 │                                  ▼                                         │
 │                 ┌─────────────────────────────────────┐                    │
 │                 │  RabbitMQ fanout exchange            │                    │
-│                 │  "ingest.fanout"                     │                    │
+│                 │  "events.fanout"                     │                    │
 │                 └──┬──────────┬──────────┬────────────┘                    │
 │                    │          │          │                                  │
 │                    ▼          ▼          ▼                                  │
@@ -116,7 +116,7 @@ The assignment implements the production architecture using Docker-friendly equi
 | **Service Layer**      | Business logic — validates inputs, runs parameterized queries, enforces permissions (Gate 2) | Both |
 | **Database**           | Single source of truth — users, sources, customers, events, pre-computed metrics | Both |
 | **LLM Provider**       | Powers both agents — conversation handling and data retrieval          | Both        |
-| **Redis**              | Source token validation cache (TTL 5min) for webhook ingestion         | Both        |
+| **Redis**              | Source token validation cache + role-permission cache (TTL 5min)       | Both        |
 | **Message Broker**     | Fan-out — ingestion publishes once, multiple consumers receive independently. RabbitMQ (assignment) / SNS+SQS (production) | Both |
 | **Worker: Data Store** | Transforms raw webhook payload, resolves customer, writes event to DB  | Both        |
 | **Worker: Metrics**    | Recalculates affected customer metrics on new events                   | Both        |
@@ -158,39 +158,26 @@ User: "What about their recent tickets?"        ← "their" = Acme Corp
 Agent: needs prior context to resolve this
 ```
 
-**Assignment approach: in-memory sessions (per authenticated user)**
+**Assignment approach: database-persisted sessions**
+
+Chat sessions and messages are stored in the database via `chat_sessions` and `chat_messages` tables (see schema above). Each session belongs to a single authenticated user.
 
 ```
-Server memory:
-  sessions = {
-    "session_abc": [
-      {"role": "user", "content": "Tell me about Acme Corp"},
-      {"role": "assistant", "content": "Acme Corp has..."},
-      {"role": "user", "content": "What about their recent tickets?"}
-    ]
-  }
+chat_sessions                        chat_messages
+├── id           UUID     PK         ├── id          UUID     PK
+├── user_id      UUID     FK         ├── session_id  UUID     FK
+├── last_message_at  TIMESTAMPTZ     ├── role        VARCHAR  (user | assistant)
+├── message_count    INTEGER         ├── content     TEXT
+├── is_active    BOOLEAN             ├── sources     JSONB    (source attribution)
+├── created_at   TIMESTAMPTZ         ├── tool_calls  JSONB    (tool call history)
+├── updated_at   TIMESTAMPTZ         └── created_at  TIMESTAMPTZ
+├── deleted_at   TIMESTAMPTZ
+└── deleted_by   UUID     FK
 ```
 
-Each chat session gets a session ID (generated on first message). The orchestrator receives the full message history on every call, enabling follow-ups, pronoun resolution, and context-aware answers. Sessions live in server memory — no extra database table needed.
+Each chat session gets a session ID (generated on first message, or omit `session_id` in the request to create a new session). The orchestrator receives the full message history on every call, enabling follow-ups, pronoun resolution, and context-aware answers. Sessions persist across server restarts and follow the global soft-delete convention.
 
-**Production upgrade: persistent conversation store**
-
-In production, we'd persist conversations to a database table:
-
-```
-conversations
-├── id             UUID        PK
-├── session_id     UUID        (groups messages in a session)
-├── role           VARCHAR     (user / assistant)
-├── content        TEXT
-├── metadata       JSONB       (tool calls, sources, latency)
-├── created_at     TIMESTAMPTZ
-├── created_by     UUID        FK → users.id
-├── deleted_at     TIMESTAMPTZ (soft delete)
-├── deleted_by     UUID        FK → users.id
-```
-
-This enables: conversation recall across server restarts, audit trails, analytics on common question patterns, and training data collection. A TTL-based cleanup job would expire old sessions.
+**Production upgrade**: streaming responses, TTL-based cleanup of old sessions, analytics on common question patterns.
 
 ---
 
@@ -200,63 +187,110 @@ This enables: conversation recall across server restarts, audit trails, analytic
 
 ```
 ┌──────────────────────────────────┐
+│            users                 │
+├──────────────────────────────────┤
+│ id             UUID         PK   │
+│ email          VARCHAR(255)      │  UNIQUE
+│ full_name      VARCHAR(255)      │
+│ password_hash  VARCHAR(255)      │  (write-only, never in responses)
+│ role_id        UUID         FK   │  → roles.id
+│ is_active      BOOLEAN           │
+│ last_login_at  TIMESTAMPTZ       │
+│ created_at     TIMESTAMPTZ       │
+│ created_by     UUID         FK   │
+│ updated_at     TIMESTAMPTZ       │
+│ updated_by     UUID         FK   │
+│ deleted_at     TIMESTAMPTZ       │
+│ deleted_by     UUID         FK   │
+└──────────────────────────────────┘
+
+┌──────────────────────────────────┐
+│            roles                 │
+├──────────────────────────────────┤
+│ id             UUID         PK   │
+│ name           VARCHAR(50)       │  UNIQUE (natural key)
+│ display_name   VARCHAR(100)      │
+│ description    VARCHAR(255)      │
+│ created_at     TIMESTAMPTZ       │
+│ updated_at     TIMESTAMPTZ       │
+│ deleted_at     TIMESTAMPTZ       │
+│ deleted_by     UUID         FK   │
+└──────────────────────────────────┘
+
+┌──────────────────────────────────┐
+│         permissions              │
+├──────────────────────────────────┤
+│ id             UUID         PK   │
+│ code           VARCHAR(50)       │  UNIQUE (e.g. customers.read)
+│ description    VARCHAR(255)      │
+└──────────────────────────────────┘
+
+┌──────────────────────────────────┐
+│      role_permissions            │
+├──────────────────────────────────┤
+│ role_id        UUID         FK   │  → roles.id      ┐
+│ permission_id  UUID         FK   │  → permissions.id ┘ composite PK
+└──────────────────────────────────┘
+
+┌──────────────────────────────────┐
 │          sources                 │
 ├──────────────────────────────────┤
-│ id           UUID           PK   │
-│ name         VARCHAR(100)        │──────────────────────────────────┐
-│ api_token    VARCHAR(255)        │   (referenced by source_id FK)   │
-│ is_active    BOOLEAN             │                                  │
-│ description  TEXT                │                                  │
-│ created_at   TIMESTAMPTZ         │                                  │
-│ created_by   UUID           FK   │                                  │
-│ updated_at   TIMESTAMPTZ         │                                  │
-│ updated_by   UUID           FK   │                                  │
-│ deleted_at   TIMESTAMPTZ         │                                  │
-│ deleted_by   UUID           FK   │                                  │
+│ id             UUID         PK   │
+│ name           VARCHAR(100)      │  UNIQUE ─────────────────────────┐
+│ api_token_hash VARCHAR(255)      │  (write-only, never in responses)│
+│ is_active      BOOLEAN           │                                  │
+│ description    TEXT               │  (referenced by source_id FK)   │
+│ created_at     TIMESTAMPTZ       │                                  │
+│ created_by     UUID         FK   │                                  │
+│ updated_at     TIMESTAMPTZ       │                                  │
+│ updated_by     UUID         FK   │                                  │
+│ deleted_at     TIMESTAMPTZ       │                                  │
+│ deleted_by     UUID         FK   │                                  │
 └──────────────────────────────────┘                                  │
                                                                       │
 ┌──────────────────────────────────┐   ┌──────────────────────────────┴──────┐
 │         customers                │   │            events                   │
 ├──────────────────────────────────┤   ├─────────────────────────────────────┤
-│ id           UUID           PK   │─┐ │ id             UUID           PK   │
-│ company_name VARCHAR(255)        │ │ │ customer_id    UUID           FK   │
-│ contact_name VARCHAR(255)        │ └>│ source_id      UUID           FK   │
-│ email        VARCHAR(255)        │   │ event_type     VARCHAR(50)         │
+│ id             UUID         PK   │─┐ │ id             UUID           PK   │
+│ company_name   VARCHAR(255)      │ │ │ customer_id    UUID           FK   │
+│ contact_name   VARCHAR(255)      │ └>│ source_id      UUID           FK   │
+│ email          VARCHAR(255)      │   │ event_type     VARCHAR(50)         │
 │ contract_value DECIMAL(12,2)     │   │ title          VARCHAR(255)        │
-│ signup_date  DATE                │   │ description    TEXT                │
-│ source_id    UUID           FK   │──>│ occurred_at    TIMESTAMPTZ         │
-│ created_at   TIMESTAMPTZ         │   │ data           JSONB               │
-│ created_by   UUID           FK   │   │ created_at     TIMESTAMPTZ         │
-│ updated_at   TIMESTAMPTZ         │   │ created_by     UUID           FK   │
-│ updated_by   UUID           FK   │   │ deleted_at     TIMESTAMPTZ         │
-│ deleted_at   TIMESTAMPTZ         │   │ deleted_by     UUID           FK   │
-│ deleted_by   UUID           FK   │   └─────────────────────────────────────┘
+│ currency_code  VARCHAR(3)        │   │ description    TEXT                │
+│ signup_date    DATE               │   │ occurred_at    TIMESTAMPTZ         │
+│ source_id      UUID         FK   │──>│ data           JSONB               │
+│ created_at     TIMESTAMPTZ       │   │ created_at     TIMESTAMPTZ         │
+│ created_by     UUID         FK   │   │ created_by     UUID           FK   │
+│ updated_at     TIMESTAMPTZ       │   │ deleted_at     TIMESTAMPTZ         │
+│ updated_by     UUID         FK   │   │ deleted_by     UUID           FK   │
+│ deleted_at     TIMESTAMPTZ       │   └─────────────────────────────────────┘
+│ deleted_by     UUID         FK   │
 └──────────────────────────────────┘
                 │
                 │ 1:N
                 ▼
-┌──────────────────────────────────┐
-│     customer_metrics             │
-├──────────────────────────────────┤
-│ id           UUID           PK   │
-│ customer_id  UUID           FK   │
-│ metric_name  VARCHAR(100)        │──┐
-│ metric_value DECIMAL(15,4)       │  │
-│ note         TEXT                 │  │
-│ created_at   TIMESTAMPTZ         │  │
-│ created_by   UUID           FK   │  │
-│ updated_at   TIMESTAMPTZ         │  │
-│ updated_by   UUID           FK   │  │
-│ deleted_at   TIMESTAMPTZ         │  │
-│ deleted_by   UUID           FK   │  │
-└──────────────────────────────────┘  │
-  UNIQUE(customer_id, metric_name)    │
-                                      │ references by name
-                                      ▼
+┌──────────────────────────────────────┐
+│     customer_metrics                 │
+├──────────────────────────────────────┤
+│ id                   UUID       PK   │
+│ customer_id          UUID       FK   │──┐
+│ metric_definition_id UUID       FK   │  │ UNIQUE(customer_id, metric_definition_id)
+│ metric_value         DECIMAL(15,4)   │  │
+│ note                 TEXT             │  │
+│ created_at           TIMESTAMPTZ     │  │
+│ created_by           UUID       FK   │  │
+│ updated_at           TIMESTAMPTZ     │  │
+│ updated_by           UUID       FK   │  │
+│ deleted_at           TIMESTAMPTZ     │  │
+│ deleted_by           UUID       FK   │  │
+└──────────────────────────────────────┘  │
+                                          │ FK
+                                          ▼
 ┌──────────────────────────────────┐
 │      metric_definitions          │
 ├──────────────────────────────────┤
-│ name         VARCHAR(100)    PK  │
+│ id           UUID           PK   │
+│ name         VARCHAR(100)        │  UNIQUE (natural key)
 │ display_name VARCHAR(255)        │
 │ description  TEXT                │
 │ unit         VARCHAR(50)         │
@@ -269,22 +303,70 @@ This enables: conversation recall across server restarts, audit trails, analytic
 │ deleted_by   UUID           FK   │
 └──────────────────────────────────┘
 
+┌──────────────────────────────────────┐
+│   customer_metric_history            │
+├──────────────────────────────────────┤
+│ id                   UUID       PK   │  Append-only — no soft delete
+│ customer_id          UUID       FK   │
+│ metric_definition_id UUID       FK   │
+│ metric_value         DECIMAL(15,4)   │
+│ recorded_at          TIMESTAMPTZ     │
+└──────────────────────────────────────┘
+  INDEX(customer_id, metric_definition_id, recorded_at)
+
+┌──────────────────────────────────┐
+│       chat_sessions              │
+├──────────────────────────────────┤
+│ id             UUID         PK   │
+│ user_id        UUID         FK   │
+│ last_message_at TIMESTAMPTZ      │
+│ message_count  INTEGER           │
+│ is_active      BOOLEAN           │
+│ created_at     TIMESTAMPTZ       │
+│ updated_at     TIMESTAMPTZ       │
+│ deleted_at     TIMESTAMPTZ       │
+│ deleted_by     UUID         FK   │
+└──────────────────────────────────┘
+                │
+                │ 1:N
+                ▼
+┌──────────────────────────────────┐
+│       chat_messages              │
+├──────────────────────────────────┤
+│ id           UUID           PK   │  Append-only — no soft delete
+│ session_id   UUID           FK   │
+│ role         VARCHAR(20)         │  (user | assistant)
+│ content      TEXT                │
+│ sources      JSONB               │  (source attribution)
+│ tool_calls   JSONB               │  (tool call history)
+│ created_at   TIMESTAMPTZ         │
+└──────────────────────────────────┘
+
 All entities use soft delete (deleted_at IS NOT NULL) — no physical deletes.
 All queries exclude soft-deleted records by default.
-Events are append-only: no updated_by (never modified after creation).
+Events are append-only: no updated_at/updated_by (never modified after creation).
+Chat messages are append-only: no updates, no deletes.
+Customer metric history is append-only: snapshot per recomputation for trend analysis.
 ```
 
-### Five Tables, Five Purposes
+### Twelve Tables, Twelve Purposes
 
-| Table                  | Purpose                                        | Write Pattern              | Read Pattern                         | Delete Pattern |
-| ---------------------- | ---------------------------------------------- | -------------------------- | ------------------------------------ | -------------- |
-| **sources**            | Registry of integrated data sources + auth     | Admin creates/updates      | Token validation on every ingest     | Soft delete    |
-| **customers**          | Core profile data (from CRM)                   | Upsert on ingestion        | Lookup by name/id                    | Soft delete    |
-| **events**             | Raw activity log from all sources              | Append-only, high volume   | Filter by type/time/customer         | Soft delete    |
-| **customer_metrics**   | Pre-computed per-customer KPIs                 | Updated by background jobs | Fast key-value lookup                | Soft delete    |
-| **metric_definitions** | Catalog of all available metrics (MCP-style)   | Registered by metric jobs  | Agent reads to discover capabilities | Soft delete    |
+| Table                        | Purpose                                        | Write Pattern              | Read Pattern                         | Delete Pattern |
+| ---------------------------- | ---------------------------------------------- | -------------------------- | ------------------------------------ | -------------- |
+| **roles**                    | Team-based access levels (seeded)              | Seed + CRUD                | Permission resolution on every request | Soft delete  |
+| **permissions**              | Granular access rights (seeded)                | Seed only                  | Joined via role_permissions          | None           |
+| **role_permissions**         | Junction: which role has which permissions     | Seed + CRUD                | Permission resolution (cached in Redis) | None        |
+| **users**                    | Internal team members with roles               | Admin creates/updates      | Auth on every request (JWT)          | Soft delete    |
+| **sources**                  | Registry of integrated data sources + auth     | Admin creates/updates      | Token validation on every ingest     | Soft delete    |
+| **customers**                | Core profile data (from CRM)                   | Upsert on ingestion        | Lookup by name/id                    | Soft delete    |
+| **events**                   | Raw activity log from all sources              | Append-only, high volume   | Filter by type/time/customer         | Soft delete    |
+| **customer_metrics**         | Pre-computed per-customer KPIs                 | Upserted by background jobs| Fast key-value lookup                | Soft delete    |
+| **metric_definitions**       | Catalog of all available metrics (MCP-style)   | Registered by metric jobs  | Agent reads to discover capabilities | Soft delete    |
+| **customer_metric_history**  | Historical snapshots for trend analysis        | Append-only per recompute  | Time-series queries for charts       | None           |
+| **chat_sessions**            | Conversation context for multi-turn chat       | Created per conversation   | Load history for agent context       | Soft delete    |
+| **chat_messages**            | Individual messages within sessions            | Append-only                | Loaded with session history          | None           |
 
-All tables include audit fields (`created_by`, `updated_by`) and soft delete fields (`deleted_at`, `deleted_by`). Events omit `updated_by` (append-only). All `*_by` fields reference `users.id`.
+All tables include audit fields (`created_by`, `updated_by`) and soft delete fields (`deleted_at`, `deleted_by`), except: roles (timestamp + soft delete only), permissions and role_permissions (no audit or soft delete — seed data), events (omit `updated_by` — append-only), chat_messages and customer_metric_history (no audit or soft-delete — append-only). All `*_by` fields reference `users.id`.
 
 ### Why a Separate Metrics Table?
 
@@ -302,8 +384,9 @@ GROUP BY customer_id;
 **The solution with it:**
 ```sql
 -- Fast: single row lookup
-SELECT metric_value FROM customer_metrics
-WHERE customer_id = ? AND metric_name = 'support_tickets_last_30d';
+SELECT cm.metric_value FROM customer_metrics cm
+JOIN metric_definitions md ON cm.metric_definition_id = md.id
+WHERE cm.customer_id = ? AND md.name = 'support_tickets_last_30d';
 ```
 
 Benefits:
@@ -348,7 +431,7 @@ If the token is unknown or the source is deactivated (`is_active=false`), the re
 | ------------------------ | ------------------------------------------------ | --------------------------------------------- |
 | Add a new source         | Insert row with name + generated token           | Source can start sending data immediately      |
 | Disconnect a source      | Set `is_active = false`                          | All future requests rejected, no data loss     |
-| Rotate a compromised key | Update `api_token`, notify the source to update  | Old token stops working instantly              |
+| Rotate a compromised key | Update `api_token_hash`, notify the source to update | Old token stops working instantly              |
 | Audit data provenance    | Join events/customers on `source_id`             | See exactly which source contributed each record |
 
 **3. Redis caching layer for token validation (production)**
@@ -373,7 +456,7 @@ Inbound request (token: "sf_abc123")
 
 - **Cache hit path** (~1ms): Redis lookup, no DB query
 - **Cache miss path** (~5ms): DB query + populate cache
-- **Token revocation**: delete the Redis key on `is_active` change or token rotation — takes effect within the TTL window (or immediately with active invalidation)
+- **Token revocation**: delete the Redis key on `is_active` change or token rotation (update `api_token_hash`) — takes effect within the TTL window (or immediately with active invalidation)
 
 > **Assignment:** Redis is included in the Docker Compose environment, providing the same caching behavior as production. No stub or shortcut needed.
 
@@ -482,18 +565,34 @@ CREATE INDEX idx_customers_company_name ON customers
 -- Fast event filtering by customer + time range (most common query pattern)
 CREATE INDEX idx_events_customer_time ON events (customer_id, occurred_at DESC);
 
--- Fast filtering by event type
-CREATE INDEX idx_events_type ON events (event_type);
+-- Fast filtering by customer + event type + time
+CREATE INDEX idx_events_customer_type_time ON events (customer_id, event_type, occurred_at DESC);
 
 -- Fast metrics lookup by customer
 CREATE INDEX idx_metrics_customer ON customer_metrics (customer_id);
 
--- Soft delete filtering (all tables)
+-- Fast metric history trend queries
+CREATE INDEX idx_metric_history_lookup ON customer_metric_history
+  (customer_id, metric_definition_id, recorded_at);
+
+-- Fast session lookup by user
+CREATE INDEX idx_chat_sessions_user ON chat_sessions (user_id);
+
+-- Fast message lookup by session
+CREATE INDEX idx_chat_messages_session ON chat_messages (session_id);
+
+-- RBAC permission resolution
+CREATE INDEX idx_users_role_id ON users (role_id);
+
+-- Soft delete filtering (all mutable tables)
+CREATE INDEX idx_roles_deleted_at ON roles (deleted_at);
+CREATE INDEX idx_users_deleted_at ON users (deleted_at);
+CREATE INDEX idx_sources_deleted_at ON sources (deleted_at);
 CREATE INDEX idx_customers_deleted_at ON customers (deleted_at);
 CREATE INDEX idx_events_deleted_at ON events (deleted_at);
 CREATE INDEX idx_customer_metrics_deleted_at ON customer_metrics (deleted_at);
 CREATE INDEX idx_metric_definitions_deleted_at ON metric_definitions (deleted_at);
-CREATE INDEX idx_sources_deleted_at ON sources (deleted_at);
+CREATE INDEX idx_chat_sessions_deleted_at ON chat_sessions (deleted_at);
 ```
 
 ---
@@ -650,9 +749,9 @@ This pattern lets us **add new metrics without touching the schema** — just de
 
 | | Assignment (Docker Compose) | Production (AWS) |
 |---|---|---|
-| **Event-driven: Data Store** | Worker container consuming from RabbitMQ queue (`queue.data`) | **AWS Lambda** triggered by SQS |
-| **Event-driven: Metrics** | Worker container consuming from RabbitMQ queue (`queue.metrics`) | **AWS Lambda** triggered by SQS |
-| **Event-driven: Alerts** | Worker container consuming from RabbitMQ queue (`queue.alerts`) | **AWS Lambda** triggered by SQS |
+| **Event-driven: Data Store** | Worker container consuming from RabbitMQ queue (`q.data-store`) | **AWS Lambda** triggered by SQS |
+| **Event-driven: Metrics** | Worker container consuming from RabbitMQ queue (`q.metrics`) | **AWS Lambda** triggered by SQS |
+| **Event-driven: Alerts** | Worker container consuming from RabbitMQ queue (`q.alerts`) | **AWS Lambda** triggered by SQS |
 | **Scheduled: Metric recomp** | Scheduler container (APScheduler, daily cron) | **EventBridge Scheduler → Lambda** |
 | **Scheduled: Health scores** | Scheduler container (APScheduler, daily cron) | **EventBridge Scheduler → Lambda** |
 | **Scheduled: Days since contact** | Scheduler container (APScheduler, daily cron) | **EventBridge Scheduler → Lambda** |
@@ -665,7 +764,7 @@ In the assignment, all workers and the scheduler share the same Docker image as 
 
 To integrate a new data source (e.g., Zendesk):
 
-1. Insert a row into the `sources` table with `name="zendesk"` and a generated `api_token`
+1. Insert a row into the `sources` table with `name="zendesk"` and a generated API token (stored as `api_token_hash`)
 2. Configure Zendesk's outbound webhook to `POST /hooks/ingest` with the token header
 3. Add a transform rule in the Data Store consumer to map Zendesk's payload to the event schema
 4. No changes needed to: database schema, metrics calculations, agent, API, or frontend
@@ -888,11 +987,11 @@ Tool-calling gives us the expressiveness of natural language input with the safe
 | **Workers**        | 3 worker containers + 1 scheduler sharing backend image | AWS Lambda per SQS queue + EventBridge Scheduler, auto-scaling        |
 | **Scheduled Jobs** | Scheduler container (APScheduler): metric recomp, health scores, days-since-contact | EventBridge Scheduler → Lambda/Fargate                     |
 | **Metrics**        | Pre-computed on ingest + daily full recalculation | Same, with Fargate for heavy compute                                     |
-| **Caching**        | Redis for source token validation          | + Redis for query results, LLM response caching                                  |
+| **Caching**        | Redis for source token validation + role-permission cache | + Redis for query results, LLM response caching                          |
 | **Semantic Search**| LLM reads event descriptions directly via tools | Vector embeddings on meeting notes + ticket descriptions; `search_notes` tool |
 | **Batch Insights** | Not implemented                            | Scheduled LLM batch evaluator writes churn_risk, sentiment, upsell_signal metrics |
 | **Database**       | Single Postgres instance                   | Read replicas, connection pooling (PgBouncer), partitioned events table by time   |
-| **Agent**          | Two-agent (orchestrator + retriever), in-memory session history, role-aware tools | + Persistent conversation store, streaming responses          |
+| **Agent**          | Two-agent (orchestrator + retriever), DB-persisted session history, role-aware tools | + Streaming responses, session analytics          |
 | **Observability**  | Console logging                            | Structured logging, OpenTelemetry tracing, LLM call metrics, cost tracking        |
 | **Rate Limiting**  | None                                       | Per-user rate limits on API and LLM calls                                         |
 | **Error Handling** | Basic HTTP error responses                 | Retry with backoff, circuit breakers, dead letter queues                           |
@@ -908,7 +1007,7 @@ Tool-calling gives us the expressiveness of natural language input with the safe
 
 2. **Email+password login instead of SSO/OAuth2** — the JWT payload and two-gate RBAC enforcement are identical to production. Only the authentication flow differs (login endpoint vs OAuth redirect). Swap is isolated to one middleware function.
 
-3. **In-memory conversation history** — supports multi-turn context within a session (tied to authenticated user), but history is lost on server restart. Production would persist to a database table with TTL-based cleanup.
+3. **No streaming responses** — chat responses are returned as a single JSON payload. Production would add SSE streaming for real-time token delivery.
 
 4. **No vector store** — LLM reads event descriptions directly via tool results. Sufficient for 5 customers. Production would add pgvector or Qdrant with a search index consumer.
 
