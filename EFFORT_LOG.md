@@ -12,3 +12,6 @@
 
 ### Phase 4: Backend Development (v0.1)
 - 2026-02-08: Implement backend first version — models, API routes, services, workers, tests — 4h
+
+### Phase 5: Frontend Development (v0.1)
+- 2026-02-09: Implement frontend first version — 1h
