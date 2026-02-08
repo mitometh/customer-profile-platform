@@ -9,3 +9,6 @@
 
 ### Phase 3: API & Data Contracts
 - 2026-02-08: Create full contracts/v1/ suite and update plan — 3h
+
+### Phase 4: Backend Development (v0.1)
+- 2026-02-08: Implement backend first version — models, API routes, services, workers, tests — 4h
