@@ -18,6 +18,8 @@ const sizes: Record<string, string> = {
   lg: "max-w-2xl",
 };
 
+let modalCounter = 0;
+
 export function Modal({
   isOpen,
   onClose,
@@ -26,7 +28,7 @@ export function Modal({
   size = "md",
   footer,
 }: ModalProps): preact.JSX.Element | null {
-  const titleId = useRef(`modal-title-${Math.random().toString(36).slice(2, 9)}`);
+  const titleId = useRef(`modal-title-${++modalCounter}`);
 
   useEffect(() => {
     if (!isOpen) return;

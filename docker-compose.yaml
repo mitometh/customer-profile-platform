@@ -50,7 +50,6 @@ services:
       JWT_SECRET: ${JWT_SECRET:-dev-secret-key-change-in-production}
       JWT_ALGORITHM: HS256
       JWT_EXPIRY_MINUTES: "480"
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       ANTHROPIC_MODEL: claude-sonnet-4-20250514
       LOG_LEVEL: INFO
       LOG_FORMAT: console

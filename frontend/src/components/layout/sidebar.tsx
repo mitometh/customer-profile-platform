@@ -1,12 +1,8 @@
 import { type ComponentChildren } from "preact";
 
 import { cn } from "@/lib/cn";
-import { useAuth } from "@/hooks/use-auth";
 import { usePermission } from "@/hooks/use-permission";
 
-import { Avatar } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 
 interface SidebarProps {
   currentPath: string;
@@ -111,7 +107,6 @@ function isActive(currentPath: string, href: string): boolean {
 }
 
 export function Sidebar({ currentPath, collapsed }: SidebarProps): preact.JSX.Element {
-  const { user, logout } = useAuth();
   const { hasPermission } = usePermission();
 
   return (
@@ -167,32 +162,6 @@ export function Sidebar({ currentPath, collapsed }: SidebarProps): preact.JSX.El
           );
         })}
       </nav>
-
-      {user && (
-        <div class={cn("border-t border-gray-200 p-4 mt-auto", collapsed && "flex flex-col items-center p-2")}>
-          {collapsed ? (
-            <Avatar name={user.full_name} size="sm" />
-          ) : (
-            <div class="hidden lg:flex flex-col gap-2">
-              <div class="flex items-center gap-3">
-                <Avatar name={user.full_name} size="sm" />
-                <div class="min-w-0">
-                  <p class="text-sm font-medium text-gray-900 truncate">{user.full_name}</p>
-                  <Badge>{user.role}</Badge>
-                </div>
-              </div>
-              <Button variant="ghost" size="sm" onClick={logout} class="w-full justify-start">
-                Logout
-              </Button>
-            </div>
-          )}
-          {!collapsed && (
-            <div class="lg:hidden flex flex-col items-center">
-              <Avatar name={user.full_name} size="sm" />
-            </div>
-          )}
-        </div>
-      )}
     </aside>
   );
 }

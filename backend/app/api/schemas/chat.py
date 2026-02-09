@@ -1,5 +1,6 @@
 """Pydantic schemas for the chat API endpoint."""
 
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -52,3 +53,44 @@ class ChatResponse(BaseModel):
     message: MessageSchema
     sources: list[SourceAttributionSchema] = []
     tool_calls: list[ToolCallSchema] = []
+
+
+# --- Conversation history schemas ---
+
+
+class SessionSummarySchema(BaseModel):
+    """Summary of a chat session for the session list."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str | None = None
+    message_count: int
+    last_message_at: datetime | None = None
+    created_at: datetime
+
+
+class SessionMessageSchema(BaseModel):
+    """A single message within a session detail response."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    role: str
+    content: str
+    sources: list[SourceAttributionSchema] = []
+    tool_calls: list[ToolCallSchema] = []
+    created_at: datetime
+
+
+class SessionDetailSchema(BaseModel):
+    """Full session with all messages."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str | None = None
+    message_count: int
+    last_message_at: datetime | None = None
+    created_at: datetime
+    messages: list[SessionMessageSchema] = []

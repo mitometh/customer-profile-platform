@@ -9,13 +9,11 @@ from app.application.dtos.source import (
     SourceDetailDTO,
     SourceSummaryDTO,
 )
-from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
+from app.core.context import CallerContext
+from app.core.exceptions import ConflictError, NotFoundError
+from app.core.protocols import SourceRepository, TokenCache
 from app.core.types import PaginatedResult, Pagination
 from app.infrastructure.models.source import SourceModel
-from app.infrastructure.repositories.source import (
-    RedisTokenCache,
-    SqlAlchemySourceRepository,
-)
 
 
 class SourceService:
@@ -23,8 +21,8 @@ class SourceService:
 
     def __init__(
         self,
-        source_repo: SqlAlchemySourceRepository,
-        token_cache: RedisTokenCache,
+        source_repo: SourceRepository,
+        token_cache: TokenCache,
     ) -> None:
         self._source_repo = source_repo
         self._token_cache = token_cache
@@ -32,14 +30,13 @@ class SourceService:
     async def list_sources(
         self,
         pagination: Pagination,
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> PaginatedResult[SourceSummaryDTO]:
         """Return a paginated list of sources.
 
         Gate 2: requires 'sources.read' permission.
         """
-        if "sources.read" not in permissions:
-            raise ForbiddenError("sources.read")
+        ctx.require_permission("sources.read")
 
         result = await self._source_repo.list(pagination)
 
@@ -55,7 +52,7 @@ class SourceService:
     async def get_source(
         self,
         source_id: UUID,
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> SourceDetailDTO:
         """Get a single source by ID.
 
@@ -65,8 +62,7 @@ class SourceService:
             ForbiddenError: If the caller lacks sources.read.
             NotFoundError: If the source does not exist.
         """
-        if "sources.read" not in permissions:
-            raise ForbiddenError("sources.read")
+        ctx.require_permission("sources.read")
 
         source = await self._source_repo.get_by_id(source_id)
         if source is None:
@@ -78,8 +74,7 @@ class SourceService:
         self,
         name: str,
         description: str | None,
-        permissions: list[str],
-        created_by: UUID,
+        ctx: CallerContext,
     ) -> SourceCreateResultDTO:
         """Create a new source with a generated API token.
 
@@ -92,8 +87,7 @@ class SourceService:
             ForbiddenError: If the caller lacks sources.manage.
             ConflictError: If the source name already exists.
         """
-        if "sources.manage" not in permissions:
-            raise ForbiddenError("sources.manage")
+        ctx.require_permission("sources.manage")
 
         # Check name uniqueness
         existing = await self._source_repo.get_by_name(name)
@@ -109,7 +103,7 @@ class SourceService:
             description=description,
             api_token_hash=token_hash,
             is_active=True,
-            created_by=created_by,
+            created_by=ctx.user_id,
         )
         source = await self._source_repo.create(source)
 
@@ -125,8 +119,7 @@ class SourceService:
         self,
         source_id: UUID,
         updates: dict,
-        permissions: list[str],
-        updated_by: UUID,
+        ctx: CallerContext,
     ) -> SourceSummaryDTO:
         """Partially update a source (name, description, is_active).
 
@@ -139,8 +132,7 @@ class SourceService:
             NotFoundError: If the source does not exist.
             ConflictError: If the new name conflicts with another source.
         """
-        if "sources.manage" not in permissions:
-            raise ForbiddenError("sources.manage")
+        ctx.require_permission("sources.manage")
 
         source = await self._source_repo.get_by_id(source_id)
         if source is None:
@@ -164,7 +156,7 @@ class SourceService:
             if old_active != source.is_active:
                 await self._token_cache.invalidate_token(source.api_token_hash)
 
-        source.updated_by = updated_by
+        source.updated_by = ctx.user_id
         source = await self._source_repo.update(source)
 
         return self._to_summary_dto(source)
@@ -172,8 +164,7 @@ class SourceService:
     async def delete_source(
         self,
         source_id: UUID,
-        permissions: list[str],
-        deleted_by: UUID,
+        ctx: CallerContext,
     ) -> None:
         """Soft-delete a source.
 
@@ -185,8 +176,7 @@ class SourceService:
             ForbiddenError: If the caller lacks sources.manage.
             NotFoundError: If the source does not exist.
         """
-        if "sources.manage" not in permissions:
-            raise ForbiddenError("sources.manage")
+        ctx.require_permission("sources.manage")
 
         source = await self._source_repo.get_by_id(source_id)
         if source is None:
@@ -195,18 +185,17 @@ class SourceService:
         # Invalidate cache before deleting
         await self._token_cache.invalidate_token(source.api_token_hash)
 
-        await self._source_repo.soft_delete(source_id, deleted_by=deleted_by)
+        await self._source_repo.soft_delete(source_id, deleted_by=ctx.user_id)
 
     async def get_active_sources(
         self,
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> list[SourceSummaryDTO]:
         """Return all active (non-deleted) sources. Used by agent tools.
 
         Gate 2: requires 'sources.read' permission.
         """
-        if "sources.read" not in permissions:
-            raise ForbiddenError("sources.read")
+        ctx.require_permission("sources.read")
 
         result = await self._source_repo.list(Pagination(limit=100))
         return [self._to_summary_dto(src) for src in result.data if src.is_active]

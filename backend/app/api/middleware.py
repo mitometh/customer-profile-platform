@@ -4,9 +4,8 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
-from app.core.exceptions import AppError, UnauthorizedError
+from app.core.exceptions import AppError
 from app.infrastructure.logging import get_logger
-from app.infrastructure.security import decode_access_token
 
 logger = get_logger("middleware")
 
@@ -54,7 +53,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if not path.startswith("/api"):
             return await call_next(request)
 
-        # Extract Bearer token from Authorization header
         auth_header = request.headers.get("authorization")
         if not auth_header or not auth_header.lower().startswith("bearer "):
             logger.warning(
@@ -63,20 +61,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 method=request.method,
             )
             return self._unauthorized_response("Authentication required")
-
-        token = auth_header[7:]  # len("Bearer ") == 7
-        try:
-            payload = decode_access_token(token)
-        except UnauthorizedError:
-            logger.warning(
-                "auth_invalid_token",
-                path=request.url.path,
-                method=request.method,
-            )
-            return self._unauthorized_response("Invalid or expired token")
-
-        # Store decoded payload on request state for downstream access
-        request.state.token_payload = payload
 
         return await call_next(request)
 
@@ -101,57 +85,44 @@ class AuthMiddleware(BaseHTTPMiddleware):
         )
 
 
-class ErrorHandlerMiddleware(BaseHTTPMiddleware):
-    """Catches AppError subclasses and generic exceptions, returning a standard
-    JSON error response per the contract format.
+async def app_error_handler(request: Request, exc: AppError) -> JSONResponse:
+    logger.warning(
+        "app_error",
+        code=exc.code,
+        message=exc.message,
+        status_code=exc.status_code,
+        path=request.url.path,
+    )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": {
+                "code": exc.code,
+                "message": exc.message,
+                "details": exc.details,
+            },
+        },
+    )
 
-    AppError subtypes are mapped directly.  Unhandled exceptions become a 500
-    with code ``INTERNAL_ERROR`` and no stack trace in the response body.
-    """
 
-    async def dispatch(
-        self,
-        request: Request,
-        call_next: RequestResponseEndpoint,
-    ) -> Response:
-        try:
-            return await call_next(request)
-        except AppError as exc:
-            logger.warning(
-                "app_error",
-                code=exc.code,
-                message=exc.message,
-                status_code=exc.status_code,
-                path=request.url.path,
-            )
-            return JSONResponse(
-                status_code=exc.status_code,
-                content={
-                    "error": {
-                        "code": exc.code,
-                        "message": exc.message,
-                        "details": exc.details,
-                    },
-                },
-            )
-        except Exception as exc:
-            logger.error(
-                "unhandled_exception",
-                exc_type=type(exc).__name__,
-                path=request.url.path,
-                error=str(exc),
-                exc_info=True,
-            )
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": {
-                        "code": "INTERNAL_ERROR",
-                        "message": "An unexpected error occurred",
-                        "details": {},
-                    },
-                },
-            )
+async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.error(
+        "unhandled_exception",
+        exc_type=type(exc).__name__,
+        path=request.url.path,
+        error=str(exc),
+        exc_info=True,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred",
+                "details": {},
+            },
+        },
+    )
 
 
 def add_cors_middleware(app: FastAPI) -> None:

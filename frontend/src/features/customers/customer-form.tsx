@@ -37,7 +37,7 @@ interface FormErrors {
   general?: string;
 }
 
-function getInitialState(customer?: CustomerDetail): FormState {
+export function getInitialState(customer?: CustomerDetail): FormState {
   return {
     company_name: customer?.company_name ?? "",
     contact_name: customer?.contact_name ?? "",
@@ -48,7 +48,7 @@ function getInitialState(customer?: CustomerDetail): FormState {
   };
 }
 
-function validate(state: FormState, isEdit: boolean): FormErrors {
+export function validate(state: FormState, isEdit: boolean): FormErrors {
   const errors: FormErrors = {};
 
   if (!isEdit) {

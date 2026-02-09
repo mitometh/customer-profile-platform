@@ -63,7 +63,7 @@ export function UserForm({
       setErrors({});
       loadRoles();
     }
-  }, [isOpen, user]);
+  }, [isOpen, user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const loadRoles = async (): Promise<void> => {
     try {

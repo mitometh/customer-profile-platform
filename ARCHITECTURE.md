@@ -95,7 +95,7 @@ The assignment implements the production architecture using Docker-friendly equi
 
 | Service           | Image                              | Ports       | Maps to (Production)                        |
 | ----------------- | ---------------------------------- | ----------- | ------------------------------------------- |
-| **postgres**      | `postgres:16-alpine`               | 5432        | RDS / Aurora                                |
+| **postgres**      | `postgres:16-alpine`               | 5433 (host) → 5432 (container) | RDS / Aurora                                |
 | **redis**         | `redis:7-alpine`                   | 6379        | ElastiCache                                 |
 | **rabbitmq**      | `rabbitmq:3-management-alpine`     | 5672, 15672 | SNS + SQS                                   |
 | **backend**       | Custom (Python 3.12 / FastAPI)     | 8000        | ECS / EKS                                    |
@@ -103,7 +103,7 @@ The assignment implements the production architecture using Docker-friendly equi
 | **worker-metrics**| Same image as backend              | —           | Lambda (SQS-triggered)                       |
 | **worker-alerts** | Same image as backend              | —           | Lambda (SQS-triggered)                       |
 | **scheduler**     | Same image as backend              | —           | EventBridge Scheduler → Lambda/Fargate       |
-| **frontend**      | Custom (Preact + Vite)             | 3000        | CloudFront + S3                              |
+| **frontend**      | `node:20-alpine` (dev) / Nginx (prod) | 3000        | CloudFront + S3                              |
 
 ### Component Responsibilities
 
@@ -121,7 +121,7 @@ The assignment implements the production architecture using Docker-friendly equi
 | **Worker: Data Store** | Transforms raw webhook payload, resolves customer, writes event to DB  | Both        |
 | **Worker: Metrics**    | Recalculates affected customer metrics on new events                   | Both        |
 | **Worker: Alerts**     | Checks thresholds (e.g., 5+ tickets/week), logs warnings              | Both        |
-| **Scheduler**          | Periodic jobs — daily metric recalculation, health scores, days-since-last-contact | Both (Docker container in assignment, EventBridge+Lambda in production) |
+| **Scheduler**          | Periodic jobs — metric recalculation, health scores, days-since-last-contact (configurable interval, default 1 min in dev) | Both (Docker container in assignment, EventBridge+Lambda in production) |
 | **Frontend**           | Preact + TypeScript + Tailwind CSS — chat UI, customer browsing, 360 views, role-adaptive UI | Both |
 
 ### Tech Stack
@@ -166,11 +166,12 @@ Chat sessions and messages are stored in the database via `chat_sessions` and `c
 chat_sessions                        chat_messages
 ├── id           UUID     PK         ├── id          UUID     PK
 ├── user_id      UUID     FK         ├── session_id  UUID     FK
-├── last_message_at  TIMESTAMPTZ     ├── role        VARCHAR  (user | assistant)
-├── message_count    INTEGER         ├── content     TEXT
-├── is_active    BOOLEAN             ├── sources     JSONB    (source attribution)
-├── created_at   TIMESTAMPTZ         ├── tool_calls  JSONB    (tool call history)
-├── updated_at   TIMESTAMPTZ         └── created_at  TIMESTAMPTZ
+├── title        VARCHAR(255)        ├── role        VARCHAR  (user | assistant)
+├── last_message_at  TIMESTAMPTZ     ├── content     TEXT
+├── message_count    INTEGER         ├── sources     JSONB    (source attribution)
+├── is_active    BOOLEAN             ├── tool_calls  JSONB    (tool call history)
+├── created_at   TIMESTAMPTZ         └── created_at  TIMESTAMPTZ
+├── updated_at   TIMESTAMPTZ
 ├── deleted_at   TIMESTAMPTZ
 └── deleted_by   UUID     FK
 ```
@@ -211,6 +212,7 @@ Each chat session gets a session ID (generated on first message, or omit `sessio
 │ name           VARCHAR(50)       │  UNIQUE (natural key)
 │ display_name   VARCHAR(100)      │
 │ description    VARCHAR(255)      │
+│ is_system      BOOLEAN           │  (system roles cannot be deleted)
 │ created_at     TIMESTAMPTZ       │
 │ updated_at     TIMESTAMPTZ       │
 │ deleted_at     TIMESTAMPTZ       │
@@ -255,15 +257,18 @@ Each chat session gets a session ID (generated on first message, or omit `sessio
 │ company_name   VARCHAR(255)      │ │ │ customer_id    UUID           FK   │
 │ contact_name   VARCHAR(255)      │ └>│ source_id      UUID           FK   │
 │ email          VARCHAR(255)      │   │ event_type     VARCHAR(50)         │
-│ contract_value DECIMAL(12,2)     │   │ title          VARCHAR(255)        │
-│ currency_code  VARCHAR(3)        │   │ description    TEXT                │
-│ signup_date    DATE               │   │ occurred_at    TIMESTAMPTZ         │
-│ source_id      UUID         FK   │──>│ data           JSONB               │
-│ created_at     TIMESTAMPTZ       │   │ created_at     TIMESTAMPTZ         │
-│ created_by     UUID         FK   │   │ created_by     UUID           FK   │
-│ updated_at     TIMESTAMPTZ       │   │ deleted_at     TIMESTAMPTZ         │
-│ updated_by     UUID         FK   │   │ deleted_by     UUID           FK   │
-│ deleted_at     TIMESTAMPTZ       │   └─────────────────────────────────────┘
+│ phone          VARCHAR(50)       │   │ title          VARCHAR(255)        │
+│ industry       VARCHAR(100)      │   │ description    TEXT                │
+│ contract_value NUMERIC(12,2)     │   │ occurred_at    TIMESTAMPTZ         │
+│ currency_code  VARCHAR(3)        │   │ data           JSONB               │
+│ signup_date    DATE               │   │ created_at     TIMESTAMPTZ         │
+│ notes          TEXT               │   │ created_by     UUID           FK   │
+│ source_id      UUID         FK   │──>│ deleted_at     TIMESTAMPTZ         │
+│ created_at     TIMESTAMPTZ       │   │ deleted_by     UUID           FK   │
+│ created_by     UUID         FK   │   └─────────────────────────────────────┘
+│ updated_at     TIMESTAMPTZ       │
+│ updated_by     UUID         FK   │
+│ deleted_at     TIMESTAMPTZ       │
 │ deleted_by     UUID         FK   │
 └──────────────────────────────────┘
                 │
@@ -275,7 +280,7 @@ Each chat session gets a session ID (generated on first message, or omit `sessio
 │ id                   UUID       PK   │
 │ customer_id          UUID       FK   │──┐
 │ metric_definition_id UUID       FK   │  │ UNIQUE(customer_id, metric_definition_id)
-│ metric_value         DECIMAL(15,4)   │  │
+│ metric_value         DECIMAL(18,4)   │  │
 │ note                 TEXT             │  │
 │ created_at           TIMESTAMPTZ     │  │
 │ created_by           UUID       FK   │  │
@@ -309,7 +314,7 @@ Each chat session gets a session ID (generated on first message, or omit `sessio
 │ id                   UUID       PK   │  Append-only — no soft delete
 │ customer_id          UUID       FK   │
 │ metric_definition_id UUID       FK   │
-│ metric_value         DECIMAL(15,4)   │
+│ metric_value         DECIMAL(18,4)   │
 │ recorded_at          TIMESTAMPTZ     │
 └──────────────────────────────────────┘
   INDEX(customer_id, metric_definition_id, recorded_at)
@@ -319,6 +324,7 @@ Each chat session gets a session ID (generated on first message, or omit `sessio
 ├──────────────────────────────────┤
 │ id             UUID         PK   │
 │ user_id        UUID         FK   │
+│ title          VARCHAR(255)      │
 │ last_message_at TIMESTAMPTZ      │
 │ message_count  INTEGER           │
 │ is_active      BOOLEAN           │
@@ -558,41 +564,41 @@ We keep a few **dimension columns** (`source`, `event_type`, `title`, `occurred_
 **Indexes**
 
 ```sql
--- Fast customer lookup by name (case-insensitive, partial match)
-CREATE INDEX idx_customers_company_name ON customers
+-- Fast customer lookup by name (case-insensitive, partial match via pg_trgm)
+CREATE INDEX ix_customers_company_name ON customers
   USING gin (company_name gin_trgm_ops);
 
 -- Fast event filtering by customer + time range (most common query pattern)
-CREATE INDEX idx_events_customer_time ON events (customer_id, occurred_at DESC);
+CREATE INDEX ix_events_customer_occurred ON events (customer_id, occurred_at DESC);
 
 -- Fast filtering by customer + event type + time
-CREATE INDEX idx_events_customer_type_time ON events (customer_id, event_type, occurred_at DESC);
+CREATE INDEX ix_events_customer_type_occurred ON events (customer_id, event_type, occurred_at DESC);
 
 -- Fast metrics lookup by customer
-CREATE INDEX idx_metrics_customer ON customer_metrics (customer_id);
+CREATE INDEX ix_customer_metrics_customer_id ON customer_metrics (customer_id);
 
 -- Fast metric history trend queries
-CREATE INDEX idx_metric_history_lookup ON customer_metric_history
+CREATE INDEX ix_customer_metric_history_lookup ON customer_metric_history
   (customer_id, metric_definition_id, recorded_at);
 
 -- Fast session lookup by user
-CREATE INDEX idx_chat_sessions_user ON chat_sessions (user_id);
+CREATE INDEX ix_chat_sessions_user_id ON chat_sessions (user_id);
 
 -- Fast message lookup by session
-CREATE INDEX idx_chat_messages_session ON chat_messages (session_id);
+CREATE INDEX ix_chat_messages_session_id ON chat_messages (session_id);
 
 -- RBAC permission resolution
-CREATE INDEX idx_users_role_id ON users (role_id);
+CREATE INDEX ix_users_role_id ON users (role_id);
 
 -- Soft delete filtering (all mutable tables)
-CREATE INDEX idx_roles_deleted_at ON roles (deleted_at);
-CREATE INDEX idx_users_deleted_at ON users (deleted_at);
-CREATE INDEX idx_sources_deleted_at ON sources (deleted_at);
-CREATE INDEX idx_customers_deleted_at ON customers (deleted_at);
-CREATE INDEX idx_events_deleted_at ON events (deleted_at);
-CREATE INDEX idx_customer_metrics_deleted_at ON customer_metrics (deleted_at);
-CREATE INDEX idx_metric_definitions_deleted_at ON metric_definitions (deleted_at);
-CREATE INDEX idx_chat_sessions_deleted_at ON chat_sessions (deleted_at);
+CREATE INDEX ix_roles_deleted_at ON roles (deleted_at);
+CREATE INDEX ix_users_deleted_at ON users (deleted_at);
+CREATE INDEX ix_sources_deleted_at ON sources (deleted_at);
+CREATE INDEX ix_customers_deleted_at ON customers (deleted_at);
+CREATE INDEX ix_events_deleted_at ON events (deleted_at);
+CREATE INDEX ix_customer_metrics_deleted_at ON customer_metrics (deleted_at);
+CREATE INDEX ix_metric_definitions_deleted_at ON metric_definitions (deleted_at);
+CREATE INDEX ix_chat_sessions_deleted_at ON chat_sessions (deleted_at);
 ```
 
 ---
@@ -752,9 +758,9 @@ This pattern lets us **add new metrics without touching the schema** — just de
 | **Event-driven: Data Store** | Worker container consuming from RabbitMQ queue (`q.data-store`) | **AWS Lambda** triggered by SQS |
 | **Event-driven: Metrics** | Worker container consuming from RabbitMQ queue (`q.metrics`) | **AWS Lambda** triggered by SQS |
 | **Event-driven: Alerts** | Worker container consuming from RabbitMQ queue (`q.alerts`) | **AWS Lambda** triggered by SQS |
-| **Scheduled: Metric recomp** | Scheduler container (APScheduler, daily cron) | **EventBridge Scheduler → Lambda** |
-| **Scheduled: Health scores** | Scheduler container (APScheduler, daily cron) | **EventBridge Scheduler → Lambda** |
-| **Scheduled: Days since contact** | Scheduler container (APScheduler, daily cron) | **EventBridge Scheduler → Lambda** |
+| **Scheduled: Metric recomp** | Scheduler container (APScheduler, configurable interval — default 1 min) | **EventBridge Scheduler → Lambda** |
+| **Scheduled: Health scores** | Scheduler container (APScheduler, configurable interval — default 1 min) | **EventBridge Scheduler → Lambda** |
+| **Scheduled: Days since contact** | Scheduler container (APScheduler, configurable interval — default 1 min) | **EventBridge Scheduler → Lambda** |
 | **Batch evaluator** | Not implemented — insights from direct LLM reads | **EventBridge Scheduler → Fargate** — iterates customers, calls LLM per batch, writes insight metrics |
 | **Search indexing** | Not implemented — LLM reads descriptions directly | **Lambda** triggered by SQS — embeds event descriptions into vector store on arrival |
 
@@ -985,7 +991,7 @@ Tool-calling gives us the expressiveness of natural language input with the safe
 | **Data Ingestion** | Seed script + webhook endpoint with RabbitMQ fan-out | Webhook endpoint + SNS/SQS fan-out with per-source tokens               |
 | **Message Broker** | RabbitMQ (fanout exchange → per-consumer queues) | SNS → SQS (same fan-out pattern, AWS-managed)                             |
 | **Workers**        | 3 worker containers + 1 scheduler sharing backend image | AWS Lambda per SQS queue + EventBridge Scheduler, auto-scaling        |
-| **Scheduled Jobs** | Scheduler container (APScheduler): metric recomp, health scores, days-since-contact | EventBridge Scheduler → Lambda/Fargate                     |
+| **Scheduled Jobs** | Scheduler container (APScheduler, configurable interval): metric recomp, health scores, days-since-contact | EventBridge Scheduler → Lambda/Fargate                     |
 | **Metrics**        | Pre-computed on ingest + daily full recalculation | Same, with Fargate for heavy compute                                     |
 | **Caching**        | Redis for source token validation + role-permission cache | + Redis for query results, LLM response caching                          |
 | **Semantic Search**| LLM reads event descriptions directly via tools | Vector embeddings on meeting notes + ticket descriptions; `search_notes` tool |

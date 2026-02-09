@@ -1,29 +1,42 @@
 ## My Solution Thinking
 
 ### Webhook Ingestion
-- Single webhook endpoint for all sources to push data into.
+- Single webhook endpoint (`POST /hooks/ingest`) for all sources to push data into.
 - Each source gets a registered name + API token. Easy to add, disconnect, or rotate keys without affecting other sources.
+- Token validation is Redis-cached (TTL 5min) — avoids DB round-trip on every webhook.
+- Endpoint does minimal work: validate token → publish to broker → return 202 Accepted.
 
-### Fan-Out Processing (SNS → SQS)
-- Webhook publishes to SNS immediately, returns 202 — non-blocking.
-- SNS fans out to multiple SQS queues (data storage, metrics, alerts, etc.), so consumers process independently.
+### Fan-Out Processing
+- **Assignment:** RabbitMQ fanout exchange → per-consumer queues. **Production:** SNS → SQS. Same 1-publish-N-consume pattern, different broker.
+- Webhook publishes to the broker immediately, returns 202 — non-blocking.
+- Fans out to 3 independent worker queues (data storage, metrics recalculation, alert threshold checks), so consumers process independently.
 
-### Data Model
+### Data Model (12 Tables)
 - **Sources table** — registry of integrated sources with token auth and active/inactive status. Redis-cached for fast validation.
 - **Customers table** — core profile data from CRM.
-- **Events table** — dimension columns (source, type, timestamp) for filtering + single JSONB `data` field for the full payload. Flexible for any event type without schema changes.
-- **Customer metrics table** — key-value style (customer_id, metric_name, metric_value, note). Scales to any number of metrics without adding columns.
+- **Events table** — dimension columns (source, type, timestamp) for filtering + single JSONB `data` field for the full payload. Flexible for any event type without schema changes. Append-only (no updates after creation).
+- **Customer metrics table** — pre-computed per-customer KPIs via metric_definitions FK. Scales to any number of metrics without adding columns.
+- **Metric definitions table** — self-describing catalog (name, display_name, description, unit, value_type). Agent discovers metrics dynamically — no hardcoded names in prompts.
+- **Customer metric history** — append-only snapshots per recomputation for trend analysis.
+- **Chat sessions + chat messages** — DB-persisted conversation history for multi-turn context. Sessions belong to a user, messages are append-only.
+- **Users, roles, permissions, role_permissions** — full RBAC with 5 roles and 15 permissions.
+- All mutable entities use soft delete (`deleted_at IS NOT NULL`), no physical deletes.
 
 ### Background Jobs
-- Workers consume events and compute metrics (support ticket count, days since last contact, health score, etc.).
-- Results written to the customer metrics table via upsert.
-- Two modes: event-driven (near real-time) + scheduled (daily full recalculation).
-- For assignment: simple in-process tasks or Celery workers.
-- For production: Lambda for SQS-triggered event processing (scales to zero, pay-per-invocation), EventBridge scheduled rules for daily recalculations, ECS/Fargate for long-running or heavy compute jobs.
+- **3 event-driven workers** (Docker containers sharing backend image, different entrypoints):
+  - **Data Store worker** — transforms raw webhook payload, resolves customer, writes event to DB.
+  - **Metrics worker** — recalculates affected customer metrics on new events.
+  - **Alerts worker** — checks thresholds (e.g., 5+ tickets/week), logs warnings.
+- **1 scheduler service** (APScheduler, configurable interval — default 1min in dev):
+  - Daily metric recalculation (full recompute across all customers).
+  - Health score computation.
+  - Days-since-last-contact calculation.
+- Results written to the customer metrics table via upsert + snapshot to metric history.
+- For production: Lambda for SQS-triggered event processing (scales to zero), EventBridge Scheduler for daily recalculations, Fargate for long-running compute.
 
 ### AI Agent — Two-Agent Design
 - **Orchestrator agent** — the primary conversational interface. Receives all user messages, maintains chat context. For data questions, it decides what data is needed and delegates to the retriever. For casual messages ("Hello", "Thanks"), it responds directly. It owns the final response — takes raw data from the retriever and synthesizes a user-facing answer with source citations.
-- **Retriever agent** — pure data-fetching utility. Takes a structured data request, calls tools against the service layer (parameterized queries, not raw SQL), returns raw structured results. No conversation logic.
+- **Retriever agent** — pure data-fetching utility. Takes a structured data request, calls tools against the service layer (parameterized queries, not raw SQL), returns raw structured results. Never speaks to the user directly.
 - The orchestrator owns the conversation; the retriever owns the data. Clear boundary, easy to debug.
 
 ### Metrics Catalog API (MCP-style)
@@ -34,8 +47,30 @@
 
 ### Conversation History
 - Needed for multi-turn context — e.g., user asks about Acme Corp, then says "What about their tickets?" The agent needs to know "their" = Acme Corp.
-- For the assignment: in-memory per session (dict of session_id → messages). Simple, no extra table, good enough for demo.
-- For production: persist to DB (conversations table with session_id, role, content, timestamp). Enables history recall, audit trail, analytics on common questions.
+- **DB-persisted sessions** — `chat_sessions` and `chat_messages` tables. Each session belongs to a single authenticated user. Messages are append-only (no updates, no deletes). The orchestrator receives the full message history on every call for follow-ups, pronoun resolution, and context-aware answers.
+- Sessions persist across server restarts and follow the global soft-delete convention.
+- For production: add streaming responses, TTL-based cleanup of old sessions, analytics on common question patterns.
+
+### Frontend
+- **Preact + TypeScript + Tailwind CSS + Vite** — lightweight, fast SPA.
+- Role-adaptive UI — navigation and features adjust based on the authenticated user's permissions.
+- Chat interface with session management (create, switch, view history).
+- Customer browsing with list/search/detail/timeline views.
+- Admin panels for user management, role viewing, and source management.
+
+### Docker Compose (9 Services)
+All services start with a single `docker compose up`:
+1. **postgres** (5432) — single source of truth
+2. **redis** (6379) — token cache + role-permission cache
+3. **rabbitmq** (5672/15672) — fanout exchange for event processing
+4. **backend** (8000) — FastAPI: REST API + Agent + Ingestion + Auth
+5. **worker-data** — transforms + writes events to DB
+6. **worker-metrics** — recalculates customer metrics
+7. **worker-alerts** — checks thresholds + logs warnings
+8. **scheduler** — periodic metric recomp, health scores, days-since-contact
+9. **frontend** (3000) — Preact SPA
+
+Workers + scheduler share the same backend image with different entrypoints.
 
 ---
 
@@ -61,14 +96,15 @@
 - **Source isolation** — `is_active` flag on sources table acts as a kill switch. Disable a source and all its future data is rejected at the edge.
 - **Redis TTL on tokens** — even if Redis is stale, worst case is a 5-minute window before revocation takes effect. Active invalidation reduces this to near-zero.
 - **JSONB for event data** — flexible schema, but sensitive fields (PII) can be encrypted at the field level before storage.
+- **Two-gate RBAC** — LLM is never the security boundary. Gate 1 filters tools before the LLM sees them; Gate 2 enforces permissions in deterministic service-layer code. Even prompt injection can't bypass Gate 2.
 
-### Bonus: Auth & RBAC Design (Contracts Layer)
-While auth is not implemented in the assignment, the full design is documented in `contracts/v1/`:
+### Auth & RBAC (Fully Implemented)
+Built-in JWT auth with email+password login. Production would swap to SSO/OAuth2 — the authorization logic (two-gate enforcement) is identical.
 
-- **Team-based roles** — 5 roles (sales, support, cs_manager, ops, admin) with 13 granular permissions in `resource.action` format.
+- **Team-based roles** — 5 roles (sales, support, cs_manager, ops, admin) with 15 granular permissions in `resource.action` format.
 - **LLM permission enforcement via two-channel architecture** — the hard problem: how do you enforce RBAC when users interact through an AI agent? Solution:
   - **Gate 1 (Soft/UX):** Filter the LLM's tool definitions by user permissions *before* calling the LLM. A sales user's agent literally cannot see source management tools — the LLM can't call what it doesn't know exists.
   - **Gate 2 (Hard/Security):** Service layer checks permissions on every tool execution using the user context from the JWT (passed via application memory, never through the LLM). Even if Gate 1 fails (prompt injection, bug), Gate 2 blocks unauthorized access with deterministic code.
   - **Two channels:** The user's auth token and the LLM's data travel on separate code paths. They converge only at the service layer. The LLM cannot read, forge, or manipulate the user context.
-- **User stories with acceptance criteria** — 8 stories covering SSO login, role-aware UI, user management, API enforcement, and LLM permission gating (see `contracts/v1/user-stories.yaml`, EPIC-5).
+- **Role-adaptive UI** — frontend adapts navigation and available features based on the user's role/permissions.
 - **Full contract references:** `contracts/v1/models/user.yaml` (roles, permissions, AgentUserContext), `contracts/v1/api/chat.yaml` (permission_enforcement, two_channel_architecture, tool_permission_map).

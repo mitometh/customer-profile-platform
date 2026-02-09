@@ -9,7 +9,8 @@ structured error dicts the LLM can interpret.
 """
 
 import logging
-from datetime import datetime
+from collections.abc import Callable
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
@@ -19,6 +20,7 @@ from app.application.services.customer import CustomerService
 from app.application.services.event import EventService
 from app.application.services.metric import MetricQueryService
 from app.application.services.source import SourceService
+from app.core.context import CallerContext
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.types import Pagination
 from app.infrastructure.cache import get_redis
@@ -201,6 +203,10 @@ TOOL_DEFINITIONS: list[dict] = [
 
 def _make_serializable(obj: object) -> object:
     """Recursively convert non-JSON-serializable types."""
+    if obj is None:
+        return obj
+    if isinstance(obj, (str, int, float, bool)):
+        return obj
     if isinstance(obj, dict):
         return {k: _make_serializable(v) for k, v in obj.items()}
     if isinstance(obj, list):
@@ -211,60 +217,10 @@ def _make_serializable(obj: object) -> object:
         return float(obj)
     if isinstance(obj, datetime):
         return obj.isoformat()
-    if hasattr(obj, "__dict__"):
-        return _make_serializable(obj.__dict__)
-    return obj
-
-
-# ---------------------------------------------------------------------------
-# Tool execution dispatcher
-# ---------------------------------------------------------------------------
-
-
-async def execute_tool(
-    tool_name: str,
-    tool_input: dict,
-    session: AsyncSession,
-    permissions: list[str],
-) -> dict:
-    """Execute a tool call and return the result as a JSON-serializable dict.
-
-    Routing:
-        - ``lookup_customer`` / ``list_customers``  -> CustomerService
-        - ``get_customer_detail``                    -> CustomerService
-        - ``query_events``                           -> EventService
-        - ``get_metric``                             -> MetricQueryService
-        - ``get_metrics_catalog``                    -> MetricQueryService
-
-    Gate 2 enforcement is delegated to the service methods. If a service
-    raises ``ForbiddenError`` or ``NotFoundError`` the error is captured
-    and returned as a structured dict so the LLM can inform the user.
-    """
-    try:
-        if tool_name == "lookup_customer":
-            return await _exec_lookup_customer(session, permissions, tool_input)
-        if tool_name == "list_customers":
-            return await _exec_list_customers(session, permissions, tool_input)
-        if tool_name == "get_customer_detail":
-            return await _exec_get_customer_detail(session, permissions, tool_input)
-        if tool_name == "query_events":
-            return await _exec_query_events(session, permissions, tool_input)
-        if tool_name == "get_metric":
-            return await _exec_get_metric(session, permissions, tool_input)
-        if tool_name == "get_metrics_catalog":
-            return await _exec_get_metrics_catalog(session, permissions)
-        if tool_name == "get_sources_list":
-            return await _exec_get_sources_list(session, permissions)
-        if tool_name == "get_source_status":
-            return await _exec_get_source_status(session, permissions, tool_input)
-        return {"error": "UNKNOWN_TOOL", "message": f"Unknown tool: {tool_name}"}
-    except ForbiddenError as exc:
-        return {"error": "FORBIDDEN", "message": str(exc.message)}
-    except NotFoundError as exc:
-        return {"error": "NOT_FOUND", "message": str(exc.message)}
-    except Exception as exc:
-        logger.exception("Unexpected error executing tool %s", tool_name)
-        return {"error": "INTERNAL_ERROR", "message": "An unexpected error occurred during tool execution"}
+    if isinstance(obj, date):
+        return obj.isoformat()
+    # Fallback: convert to string representation
+    return str(obj)
 
 
 # ---------------------------------------------------------------------------
@@ -272,7 +228,7 @@ async def execute_tool(
 # ---------------------------------------------------------------------------
 
 
-async def _exec_lookup_customer(session: AsyncSession, permissions: list[str], tool_input: dict) -> dict:
+async def _exec_lookup_customer(session: AsyncSession, ctx: CallerContext, tool_input: dict) -> dict:
     """Execute lookup_customer tool."""
     customer_repo = SqlAlchemyCustomerRepository(session)
     event_repo = SqlAlchemyEventRepository(session)
@@ -282,14 +238,14 @@ async def _exec_lookup_customer(session: AsyncSession, permissions: list[str], t
     result = await service.list_customers(
         search=name,
         pagination=Pagination(limit=10),
-        permissions=permissions,
+        ctx=ctx,
     )
 
     customers = [_make_serializable(dto.__dict__) for dto in result.data]
     return {"customers": customers, "total_found": len(customers)}
 
 
-async def _exec_list_customers(session: AsyncSession, permissions: list[str], tool_input: dict) -> dict:
+async def _exec_list_customers(session: AsyncSession, ctx: CallerContext, tool_input: dict) -> dict:
     """Execute list_customers tool."""
     customer_repo = SqlAlchemyCustomerRepository(session)
     event_repo = SqlAlchemyEventRepository(session)
@@ -300,7 +256,7 @@ async def _exec_list_customers(session: AsyncSession, permissions: list[str], to
     result = await service.list_customers(
         search=search,
         pagination=Pagination(limit=limit),
-        permissions=permissions,
+        ctx=ctx,
     )
 
     customers = [_make_serializable(dto.__dict__) for dto in result.data]
@@ -311,7 +267,7 @@ async def _exec_list_customers(session: AsyncSession, permissions: list[str], to
     }
 
 
-async def _exec_get_customer_detail(session: AsyncSession, permissions: list[str], tool_input: dict) -> dict:
+async def _exec_get_customer_detail(session: AsyncSession, ctx: CallerContext, tool_input: dict) -> dict:
     """Execute get_customer_detail tool."""
     try:
         customer_id = UUID(tool_input["customer_id"])
@@ -322,12 +278,12 @@ async def _exec_get_customer_detail(session: AsyncSession, permissions: list[str
     event_repo = SqlAlchemyEventRepository(session)
     service = CustomerService(customer_repo=customer_repo, event_repo=event_repo)
 
-    detail = await service.get_customer_detail(customer_id, permissions)
+    detail = await service.get_customer_detail(customer_id, ctx=ctx)
 
     return _make_serializable(detail.__dict__)
 
 
-async def _exec_query_events(session: AsyncSession, permissions: list[str], tool_input: dict) -> dict:
+async def _exec_query_events(session: AsyncSession, ctx: CallerContext, tool_input: dict) -> dict:
     """Execute query_events tool."""
     try:
         customer_id = UUID(tool_input["customer_id"])
@@ -351,7 +307,7 @@ async def _exec_query_events(session: AsyncSession, permissions: list[str], tool
         since=since,
         until=until,
         pagination=Pagination(limit=limit),
-        permissions=permissions,
+        ctx=ctx,
     )
 
     events = [_make_serializable(dto.__dict__) for dto in result.data]
@@ -362,7 +318,7 @@ async def _exec_query_events(session: AsyncSession, permissions: list[str], tool
     }
 
 
-async def _exec_get_metric(session: AsyncSession, permissions: list[str], tool_input: dict) -> dict:
+async def _exec_get_metric(session: AsyncSession, ctx: CallerContext, tool_input: dict) -> dict:
     """Execute get_metric tool."""
     try:
         customer_id = UUID(tool_input["customer_id"])
@@ -379,7 +335,7 @@ async def _exec_get_metric(session: AsyncSession, permissions: list[str], tool_i
         history_repo=history_repo,
         customer_repo=customer_repo,
     )
-    metrics = await service.get_customer_metrics(customer_id, permissions)
+    metrics = await service.get_customer_metrics(customer_id, ctx=ctx)
 
     return {
         "customer_id": str(customer_id),
@@ -387,7 +343,7 @@ async def _exec_get_metric(session: AsyncSession, permissions: list[str], tool_i
     }
 
 
-async def _exec_get_metrics_catalog(session: AsyncSession, permissions: list[str]) -> dict:
+async def _exec_get_metrics_catalog(session: AsyncSession, ctx: CallerContext, tool_input: dict | None = None) -> dict:
     """Execute get_metrics_catalog tool."""
     customer_repo = SqlAlchemyCustomerRepository(session)
     definition_repo = SqlAlchemyMetricDefinitionRepository(session)
@@ -400,24 +356,24 @@ async def _exec_get_metrics_catalog(session: AsyncSession, permissions: list[str
         customer_repo=customer_repo,
     )
 
-    catalog = await service.get_catalog(permissions)
+    catalog = await service.get_catalog(ctx=ctx)
     return {"metrics": [_make_serializable(c.__dict__) for c in catalog]}
 
 
-async def _exec_get_sources_list(session: AsyncSession, permissions: list[str]) -> dict:
+async def _exec_get_sources_list(session: AsyncSession, ctx: CallerContext, tool_input: dict | None = None) -> dict:
     """Execute get_sources_list tool."""
     source_repo = SqlAlchemySourceRepository(session)
     token_cache = RedisTokenCache(get_redis())
     service = SourceService(source_repo=source_repo, token_cache=token_cache)
 
-    sources = await service.get_active_sources(permissions)
+    sources = await service.get_active_sources(ctx=ctx)
     return {
         "sources": [_make_serializable(s.__dict__) for s in sources],
         "total": len(sources),
     }
 
 
-async def _exec_get_source_status(session: AsyncSession, permissions: list[str], tool_input: dict) -> dict:
+async def _exec_get_source_status(session: AsyncSession, ctx: CallerContext, tool_input: dict) -> dict:
     """Execute get_source_status tool."""
     source_repo = SqlAlchemySourceRepository(session)
     token_cache = RedisTokenCache(get_redis())
@@ -431,7 +387,7 @@ async def _exec_get_source_status(session: AsyncSession, permissions: list[str],
             source_id = UUID(source_id_str)
         except ValueError:
             return {"error": "INVALID_INPUT", "message": f"Invalid source_id: {source_id_str}"}
-        detail = await service.get_source(source_id, permissions)
+        detail = await service.get_source(source_id, ctx=ctx)
         return _make_serializable(detail.__dict__)
 
     if source_name:
@@ -439,7 +395,49 @@ async def _exec_get_source_status(session: AsyncSession, permissions: list[str],
         source = await source_repo.get_by_name(source_name)
         if source is None:
             return {"error": "NOT_FOUND", "message": f"Source '{source_name}' not found"}
-        detail = await service.get_source(source.id, permissions)
+        detail = await service.get_source(source.id, ctx=ctx)
         return _make_serializable(detail.__dict__)
 
     return {"error": "INVALID_INPUT", "message": "Provide source_name or source_id"}
+
+
+# ---------------------------------------------------------------------------
+# Tool registry
+# ---------------------------------------------------------------------------
+
+_TOOL_REGISTRY: dict[str, Callable] = {
+    "lookup_customer": _exec_lookup_customer,
+    "list_customers": _exec_list_customers,
+    "get_customer_detail": _exec_get_customer_detail,
+    "query_events": _exec_query_events,
+    "get_metric": _exec_get_metric,
+    "get_metrics_catalog": _exec_get_metrics_catalog,
+    "get_sources_list": _exec_get_sources_list,
+    "get_source_status": _exec_get_source_status,
+}
+
+
+# ---------------------------------------------------------------------------
+# Tool execution dispatcher
+# ---------------------------------------------------------------------------
+
+
+async def execute_tool(
+    tool_name: str,
+    tool_input: dict,
+    session: AsyncSession,
+    ctx: CallerContext,
+) -> dict:
+    """Execute a tool call and return the result as a JSON-serializable dict."""
+    try:
+        handler = _TOOL_REGISTRY.get(tool_name)
+        if handler is None:
+            return {"error": "UNKNOWN_TOOL", "message": f"Unknown tool: {tool_name}"}
+        return await handler(session, ctx, tool_input)
+    except ForbiddenError as exc:
+        return {"error": "FORBIDDEN", "message": str(exc.message)}
+    except NotFoundError as exc:
+        return {"error": "NOT_FOUND", "message": str(exc.message)}
+    except Exception as exc:
+        logger.exception("Unexpected error executing tool %s", tool_name)
+        return {"error": "INTERNAL_ERROR", "message": "An unexpected error occurred during tool execution"}

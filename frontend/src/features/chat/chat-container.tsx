@@ -1,38 +1,46 @@
-import { useReducer, useCallback } from "preact/hooks";
+import { useReducer, useCallback, useEffect } from "preact/hooks";
 
-import type { ChatMessage } from "@/types";
+import type { ChatMessage, SessionSummary } from "@/types";
 
-import { sendMessage } from "@/api/chat";
+import { sendMessage, getSessions, getSessionDetail } from "@/api/chat";
 import { ApiError } from "@/api/client";
 
 import { Button } from "@/components/ui/button";
 
 import { MessageList } from "@/features/chat/message-list";
 import { ChatInput } from "@/features/chat/chat-input";
+import { SessionList } from "@/features/chat/session-list";
 
-interface ChatState {
+export interface ChatState {
   sessionId: string | null;
   messages: ChatMessage[];
   isLoading: boolean;
   error: string | null;
+  sessions: SessionSummary[];
+  sessionsLoading: boolean;
 }
 
-type ChatAction =
+export type ChatAction =
   | { type: "ADD_USER_MESSAGE"; payload: string }
   | { type: "ADD_ASSISTANT_MESSAGE"; payload: ChatMessage }
   | { type: "SET_LOADING"; payload: boolean }
   | { type: "SET_ERROR"; payload: string | null }
   | { type: "SET_SESSION_ID"; payload: string }
-  | { type: "NEW_SESSION" };
+  | { type: "NEW_SESSION" }
+  | { type: "SET_SESSIONS"; payload: SessionSummary[] }
+  | { type: "SET_SESSIONS_LOADING"; payload: boolean }
+  | { type: "LOAD_SESSION"; payload: { sessionId: string; messages: ChatMessage[] } };
 
 const initialState: ChatState = {
   sessionId: null,
   messages: [],
   isLoading: false,
   error: null,
+  sessions: [],
+  sessionsLoading: false,
 };
 
-function chatReducer(state: ChatState, action: ChatAction): ChatState {
+export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "ADD_USER_MESSAGE":
       return {
@@ -55,13 +63,24 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case "SET_SESSION_ID":
       return { ...state, sessionId: action.payload };
     case "NEW_SESSION":
-      return { ...initialState };
+      return { ...initialState, sessions: state.sessions };
+    case "SET_SESSIONS":
+      return { ...state, sessions: action.payload };
+    case "SET_SESSIONS_LOADING":
+      return { ...state, sessionsLoading: action.payload };
+    case "LOAD_SESSION":
+      return {
+        ...state,
+        sessionId: action.payload.sessionId,
+        messages: action.payload.messages,
+        error: null,
+      };
     default:
       return state;
   }
 }
 
-function getErrorMessage(err: unknown): string {
+export function getErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     const codeMap: Record<string, string> = {
       UNAUTHORIZED: "Your session has expired. Please log in again.",
@@ -80,6 +99,23 @@ function getErrorMessage(err: unknown): string {
 
 export function ChatContainer(): preact.JSX.Element {
   const [state, dispatch] = useReducer(chatReducer, initialState);
+
+  const fetchSessions = useCallback(async (): Promise<void> => {
+    dispatch({ type: "SET_SESSIONS_LOADING", payload: true });
+    try {
+      const sessions = await getSessions();
+      dispatch({ type: "SET_SESSIONS", payload: sessions });
+    } catch {
+      // Silently fail — sessions list is non-critical
+    } finally {
+      dispatch({ type: "SET_SESSIONS_LOADING", payload: false });
+    }
+  }, []);
+
+  // Load sessions on mount
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
 
   const handleSend = useCallback(
     async (message: string): Promise<void> => {
@@ -100,13 +136,16 @@ export function ChatContainer(): preact.JSX.Element {
             tool_calls: response.tool_calls,
           },
         });
+
+        // Refresh sessions list after sending a message
+        fetchSessions();
       } catch (err: unknown) {
         dispatch({ type: "SET_ERROR", payload: getErrorMessage(err) });
       } finally {
         dispatch({ type: "SET_LOADING", payload: false });
       }
     },
-    [state.sessionId],
+    [state.sessionId, fetchSessions],
   );
 
   const handleNewSession = useCallback((): void => {
@@ -114,41 +153,69 @@ export function ChatContainer(): preact.JSX.Element {
   }, []);
 
   const handleRetry = useCallback((): void => {
-    // Find the last user message and retry it
     const lastUserMsg = [...state.messages].reverse().find((m) => m.role === "user");
     if (lastUserMsg) {
-      // Remove the failed user message and resend
       dispatch({ type: "SET_ERROR", payload: null });
       handleSend(lastUserMsg.content);
     }
   }, [state.messages, handleSend]);
 
+  const handleSelectSession = useCallback(async (sessionId: string): Promise<void> => {
+    try {
+      dispatch({ type: "SET_LOADING", payload: true });
+      const detail = await getSessionDetail(sessionId);
+      const messages: ChatMessage[] = detail.messages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        sources: m.sources,
+        tool_calls: m.tool_calls,
+      }));
+      dispatch({ type: "LOAD_SESSION", payload: { sessionId, messages } });
+    } catch (err: unknown) {
+      dispatch({ type: "SET_ERROR", payload: getErrorMessage(err) });
+    } finally {
+      dispatch({ type: "SET_LOADING", payload: false });
+    }
+  }, []);
+
   return (
-    <div class="flex flex-col h-full">
-      <div class="flex items-center justify-between border-b border-gray-200 px-6 py-3">
-        <h1 class="text-lg font-semibold leading-7 text-gray-950">Customer 360 Chat</h1>
-        <Button variant="secondary" size="sm" onClick={handleNewSession}>
-          New Conversation
-        </Button>
-      </div>
+    <div class="flex h-full">
+      {/* Session history sidebar — always visible */}
+      <SessionList
+        sessions={state.sessions}
+        activeSessionId={state.sessionId}
+        isLoading={state.sessionsLoading}
+        onSelect={handleSelectSession}
+        onNewSession={handleNewSession}
+      />
 
-      <MessageList messages={state.messages} isLoading={state.isLoading} />
-
-      {state.error && (
-        <div class="mx-6 mb-2 flex-shrink-0 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
-          <span>{state.error}</span>
-          <button
-            type="button"
-            onClick={handleRetry}
-            class="ml-3 text-xs font-medium text-red-700 underline hover:text-red-900 transition-colors"
-          >
-            Retry
-          </button>
+      {/* Main chat area */}
+      <div class="flex flex-col flex-1 min-w-0">
+        <div class="flex items-center justify-between border-b border-gray-200 px-6 py-3">
+          <h1 class="text-lg font-semibold leading-7 text-gray-950">Customer 360 Chat</h1>
+          <Button variant="secondary" size="sm" onClick={handleNewSession}>
+            New Conversation
+          </Button>
         </div>
-      )}
 
-      <div class="border-t border-gray-200 px-6 py-4 flex-shrink-0">
-        <ChatInput onSend={handleSend} isLoading={state.isLoading} />
+        <MessageList messages={state.messages} isLoading={state.isLoading} />
+
+        {state.error && (
+          <div class="mx-6 mb-2 flex-shrink-0 flex items-center justify-between rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+            <span>{state.error}</span>
+            <button
+              type="button"
+              onClick={handleRetry}
+              class="ml-3 text-xs font-medium text-red-700 underline hover:text-red-900 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        <div class="border-t border-gray-200 px-6 py-4 flex-shrink-0">
+          <ChatInput onSend={handleSend} isLoading={state.isLoading} />
+        </div>
       </div>
     </div>
   );

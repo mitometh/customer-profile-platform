@@ -36,7 +36,7 @@ export function UserList({ class: className }: UserListProps): preact.JSX.Elemen
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRowClick = (user: UserSummary): void => {
     if (!canManage) return;

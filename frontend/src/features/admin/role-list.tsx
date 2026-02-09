@@ -35,7 +35,7 @@ export function RoleList({ class: className }: RoleListProps): preact.JSX.Elemen
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCreateRole = (): void => {
     setIsFormOpen(true);

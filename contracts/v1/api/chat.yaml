@@ -64,3 +64,61 @@ endpoints:
       403: { ref: common.yaml#error_response, desc: "Lacks chat.use permission" }
       429: { ref: common.yaml#error_response, desc: "Rate limit exceeded" }
       503: { ref: common.yaml#error_response, desc: "LLM provider unavailable" }
+
+  # --- GET /api/chat/sessions ---
+  - method: GET
+    path: /chat/sessions
+    summary: List the current user's chat sessions
+    story_refs: [US-1.2]
+    auth_required: true
+    required_permission: chat.use
+
+    response:
+      200:
+        body:
+          type: "SessionSummary[]"
+          desc: "Most recent sessions first, max 50"
+          item_fields:
+            id:              { type: uuid }
+            title:           { type: string, optional: true }
+            message_count:   { type: integer }
+            last_message_at: { type: datetime, optional: true }
+            created_at:      { type: datetime }
+
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid auth token" }
+      403: { ref: common.yaml#error_response, desc: "Lacks chat.use permission" }
+
+  # --- GET /api/chat/sessions/{session_id} ---
+  - method: GET
+    path: /chat/sessions/{session_id}
+    summary: Get a chat session with all messages (current user only)
+    story_refs: [US-1.2]
+    auth_required: true
+    required_permission: chat.use
+
+    request:
+      path_params:
+        - session_id: { type: uuid, required: true }
+
+    response:
+      200:
+        body:
+          id:              { type: uuid }
+          title:           { type: string, optional: true }
+          message_count:   { type: integer }
+          last_message_at: { type: datetime, optional: true }
+          created_at:      { type: datetime }
+          messages:
+            type: "SessionMessage[]"
+            desc: "All messages in chronological order"
+            item_fields:
+              id:         { type: uuid }
+              role:       { type: string, enum: [user, assistant] }
+              content:    { type: string }
+              sources:    { type: "Source[]", optional: true }
+              tool_calls: { type: "ToolCall[]", optional: true }
+              created_at: { type: datetime }
+
+      401: { ref: common.yaml#error_response, desc: "Missing/invalid auth token" }
+      403: { ref: common.yaml#error_response, desc: "Lacks chat.use permission" }
+      404: { ref: common.yaml#error_response, desc: "Session not found or not owned by user" }

@@ -4,11 +4,11 @@ from datetime import datetime
 from uuid import UUID
 
 from app.application.dtos.customer import EventSummaryDTO
-from app.core.exceptions import ForbiddenError, NotFoundError
+from app.core.context import CallerContext
+from app.core.exceptions import NotFoundError
+from app.core.protocols import CustomerRepository, EventRepository
 from app.core.types import PaginatedResult, Pagination
 from app.infrastructure.models.event import EventModel
-from app.infrastructure.repositories.customer import SqlAlchemyCustomerRepository
-from app.infrastructure.repositories.event import SqlAlchemyEventRepository
 
 
 class EventService:
@@ -16,8 +16,8 @@ class EventService:
 
     def __init__(
         self,
-        event_repo: SqlAlchemyEventRepository,
-        customer_repo: SqlAlchemyCustomerRepository,
+        event_repo: EventRepository,
+        customer_repo: CustomerRepository,
     ) -> None:
         self._event_repo = event_repo
         self._customer_repo = customer_repo
@@ -30,7 +30,7 @@ class EventService:
         until: datetime | None,
         order: str = "desc",
         pagination: Pagination = Pagination(),
-        permissions: list[str] | None = None,
+        ctx: CallerContext | None = None,
     ) -> PaginatedResult[EventSummaryDTO]:
         """Return a paginated timeline of events for a customer.
 
@@ -41,8 +41,10 @@ class EventService:
             NotFoundError: If the customer does not exist or is soft-deleted.
         """
         # Gate 2
-        if permissions is None or "events.read" not in permissions:
+        if ctx is None:
+            from app.core.exceptions import ForbiddenError
             raise ForbiddenError("events.read")
+        ctx.require_permission("events.read")
 
         # Verify customer exists
         customer = await self._customer_repo.get_by_id(customer_id)

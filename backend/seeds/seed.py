@@ -3,7 +3,7 @@
 Usage: python -m seeds.seed
 
 Seeds the database with:
-- 14 permissions
+- 15 permissions
 - 5 roles with role-permission mappings
 - 6 users (1 admin + 1 per role)
 - 2 sources
@@ -44,6 +44,7 @@ from app.infrastructure.security import hash_password
 
 ALL_PERMISSIONS = [
     ("customers.read", "View customer list and detail profiles"),
+    ("customers.manage", "Create, update, and soft-delete customers"),
     ("customers.export", "Export customer data (CSV, reports)"),
     ("events.read", "View customer activity timeline"),
     ("metrics.read", "View computed metrics for customers"),
@@ -109,11 +110,15 @@ ROLES_CONFIG = [
 
 USERS_CONFIG = [
     {"email": "admin@customer360.com", "full_name": "Admin User", "role": "admin"},
-    {"email": "sarah.sales@customer360.com", "full_name": "Sarah Sales", "role": "sales"},
-    {"email": "tom.support@customer360.com", "full_name": "Tom Support", "role": "support"},
-    {"email": "maria.csm@customer360.com", "full_name": "Maria CSM", "role": "cs_manager"},
+    {"email": "sarah.sales@customer360.com",
+        "full_name": "Sarah Sales", "role": "sales"},
+    {"email": "tom.support@customer360.com",
+        "full_name": "Tom Support", "role": "support"},
+    {"email": "maria.csm@customer360.com",
+        "full_name": "Maria CSM", "role": "cs_manager"},
     {"email": "dave.ops@customer360.com", "full_name": "Dave Ops", "role": "ops"},
-    {"email": "alice.admin@customer360.com", "full_name": "Alice Admin", "role": "admin"},
+    {"email": "alice.admin@customer360.com",
+        "full_name": "Alice Admin", "role": "admin"},
 ]
 
 SOURCES_CONFIG = [
@@ -225,47 +230,66 @@ CUSTOMERS_CONFIG = [
 # Event templates for generating realistic event data
 EVENT_TEMPLATES = {
     "support_ticket": [
-        ("Login issues reported", "Customer reported intermittent login failures affecting multiple users"),
+        ("Login issues reported",
+         "Customer reported intermittent login failures affecting multiple users"),
         ("Data export timeout", "Large dataset export timing out after 30 seconds"),
-        ("API rate limiting concern", "Customer hitting rate limits during peak usage hours"),
-        ("Billing discrepancy inquiry", "Customer flagged a discrepancy in the latest invoice"),
-        ("Feature request: bulk import", "Customer requested bulk data import functionality"),
-        ("Integration error with Slack", "Webhook integration with Slack returning 500 errors"),
+        ("API rate limiting concern",
+         "Customer hitting rate limits during peak usage hours"),
+        ("Billing discrepancy inquiry",
+         "Customer flagged a discrepancy in the latest invoice"),
+        ("Feature request: bulk import",
+         "Customer requested bulk data import functionality"),
+        ("Integration error with Slack",
+         "Webhook integration with Slack returning 500 errors"),
         ("Password reset not working", "Password reset emails not being delivered"),
         ("Dashboard loading slowly", "Main dashboard takes over 10 seconds to load"),
-        ("Permission configuration help", "Need assistance setting up team role-based access"),
+        ("Permission configuration help",
+         "Need assistance setting up team role-based access"),
         ("Data sync delay", "CRM data synchronization delayed by more than 2 hours"),
     ],
     "meeting": [
-        ("Quarterly business review", "QBR with key stakeholders to review adoption and ROI metrics"),
-        ("Onboarding kickoff call", "Initial kickoff meeting to plan onboarding timeline and milestones"),
+        ("Quarterly business review",
+         "QBR with key stakeholders to review adoption and ROI metrics"),
+        ("Onboarding kickoff call",
+         "Initial kickoff meeting to plan onboarding timeline and milestones"),
         ("Feature demo session", "Demonstrated upcoming Q2 features and gathered feedback"),
-        ("Escalation review call", "Reviewed open escalation tickets and agreed on resolution timelines"),
+        ("Escalation review call",
+         "Reviewed open escalation tickets and agreed on resolution timelines"),
         ("Renewal discussion", "Discussed contract renewal terms and potential expansion"),
-        ("Technical architecture review", "Deep dive into integration architecture and data flow"),
-        ("Executive sponsor check-in", "Monthly check-in with VP of Engineering on strategic alignment"),
-        ("Training session follow-up", "Follow-up on advanced training topics requested by the team"),
+        ("Technical architecture review",
+         "Deep dive into integration architecture and data flow"),
+        ("Executive sponsor check-in",
+         "Monthly check-in with VP of Engineering on strategic alignment"),
+        ("Training session follow-up",
+         "Follow-up on advanced training topics requested by the team"),
     ],
     "usage_event": [
         ("High API usage spike", "API call volume increased 300% over the past week"),
         ("New team members onboarded", "5 new users added to the platform this month"),
         ("Dashboard customization", "Customer created 12 custom dashboards this quarter"),
         ("Report generation peak", "Generated 45 reports in the last 7 days"),
-        ("New integration activated", "Customer activated the Salesforce bi-directional sync"),
-        ("Feature adoption milestone", "80% of licensed users now active on the platform"),
+        ("New integration activated",
+         "Customer activated the Salesforce bi-directional sync"),
+        ("Feature adoption milestone",
+         "80% of licensed users now active on the platform"),
     ],
     "contract_renewal": [
         ("Annual renewal processed", "12-month contract renewed with standard terms"),
-        ("Multi-year renewal signed", "Customer signed a 24-month renewal with 10% discount"),
+        ("Multi-year renewal signed",
+         "Customer signed a 24-month renewal with 10% discount"),
         ("Expansion deal closed", "Added 50 additional seats and premium support tier"),
-        ("Renewal at risk - pricing concern", "Customer expressed concern about pricing increase at renewal"),
+        ("Renewal at risk - pricing concern",
+         "Customer expressed concern about pricing increase at renewal"),
     ],
     "onboarding": [
-        ("Technical setup completed", "SSO, API keys, and webhook endpoints configured successfully"),
-        ("Data migration started", "Historical data migration from legacy system initiated"),
+        ("Technical setup completed",
+         "SSO, API keys, and webhook endpoints configured successfully"),
+        ("Data migration started",
+         "Historical data migration from legacy system initiated"),
         ("User training completed", "All 25 initial users completed onboarding training"),
         ("Go-live confirmed", "Production environment validated and customer went live"),
-        ("First integration test passed", "End-to-end integration test with customer systems passed"),
+        ("First integration test passed",
+         "End-to-end integration test with customer systems passed"),
     ],
 }
 
@@ -311,7 +335,7 @@ def _random_dt_in_last_n_days(n: int) -> datetime:
 
 
 async def _seed_permissions(session: AsyncSession) -> dict[str, PermissionModel]:
-    """Seed the 14 permissions. Returns a code->model mapping."""
+    """Seed the 15 permissions. Returns a code->model mapping."""
     perm_map: dict[str, PermissionModel] = {}
     for code, description in ALL_PERMISSIONS:
         perm = PermissionModel(id=uuid4(), code=code, description=description)
@@ -351,7 +375,8 @@ async def _seed_roles(
             rp_count += 1
 
     await session.flush()
-    print(f"  [+] Seeded {len(role_map)} roles with {rp_count} role-permission mappings")
+    print(
+        f"  [+] Seeded {len(role_map)} roles with {rp_count} role-permission mappings")
     return role_map
 
 
@@ -359,8 +384,8 @@ async def _seed_users(
     session: AsyncSession,
     role_map: dict[str, RoleModel],
 ) -> list[UserModel]:
-    """Seed the 6 users (password: 'password123' for all)."""
-    pw_hash = hash_password("password123")
+    """Seed the 6 users (password: 'Password123' for all)."""
+    pw_hash = hash_password("Password123")
     users: list[UserModel] = []
 
     for cfg in USERS_CONFIG:
@@ -466,7 +491,8 @@ async def _seed_events(
             events.append(event)
 
     await session.flush()
-    print(f"  [+] Seeded {len(events)} events across {len(customers)} customers")
+    print(
+        f"  [+] Seeded {len(events)} events across {len(customers)} customers")
     return events
 
 
@@ -546,10 +572,13 @@ async def _seed_customer_metrics(
         #   - 5 per support ticket in last 30d (floor 0)
         #   - 10 if no events in last 14d
         base = 70
-        has_meetings = any(e.event_type == "meeting" and e.occurred_at >= thirty_days_ago for e in customer_events)
-        has_usage = any(e.event_type == "usage_event" and e.occurred_at >= thirty_days_ago for e in customer_events)
+        has_meetings = any(e.event_type == "meeting" and e.occurred_at >=
+                           thirty_days_ago for e in customer_events)
+        has_usage = any(e.event_type == "usage_event" and e.occurred_at >=
+                        thirty_days_ago for e in customer_events)
         fourteen_days_ago = now - timedelta(days=14)
-        has_recent = any(e.occurred_at >= fourteen_days_ago for e in customer_events)
+        has_recent = any(
+            e.occurred_at >= fourteen_days_ago for e in customer_events)
 
         health = base
         if has_meetings:
@@ -609,7 +638,8 @@ async def _seed_customer_metrics(
         )
 
     await session.flush()
-    print(f"  [+] Seeded {metric_count} customer metric values (3 per customer)")
+    print(
+        f"  [+] Seeded {metric_count} customer metric values (3 per customer)")
     print(f"  [+] Seeded {metric_count} customer metric history entries")
     return metric_count
 
@@ -633,7 +663,8 @@ async def seed_database() -> None:
         result = await session.execute(select(PermissionModel).limit(1))
         existing = result.scalar_one_or_none()
         if existing is not None:
-            print("\n  [!] Database already seeded (permissions exist). Skipping.")
+            print(
+                "\n  [!] Database already seeded (permissions exist). Skipping.")
             print("=" * 60)
             return
 

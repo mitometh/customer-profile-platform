@@ -73,7 +73,7 @@ export function CustomerList(): preact.JSX.Element {
 
   useEffect(() => {
     refresh();
-  }, [debouncedSearch]);
+  }, [debouncedSearch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRowClick = (customer: CustomerSummary): void => {
     route(`/customers/${customer.id}`);

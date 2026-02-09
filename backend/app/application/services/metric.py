@@ -9,14 +9,15 @@ from app.application.dtos.metric import (
     CustomerMetricTrendDTO,
     TrendPointDTO,
 )
-from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError
-from app.infrastructure.models.metric import MetricDefinitionModel
-from app.infrastructure.repositories.customer import SqlAlchemyCustomerRepository
-from app.infrastructure.repositories.metric import (
-    SqlAlchemyCustomerMetricHistoryRepository,
-    SqlAlchemyCustomerMetricRepository,
-    SqlAlchemyMetricDefinitionRepository,
+from app.core.context import CallerContext
+from app.core.exceptions import ConflictError, NotFoundError
+from app.core.protocols import (
+    CustomerMetricHistoryRepository,
+    CustomerMetricRepository,
+    CustomerRepository,
+    MetricDefinitionRepository,
 )
+from app.infrastructure.models.metric import MetricDefinitionModel
 
 
 class MetricQueryService:
@@ -24,23 +25,22 @@ class MetricQueryService:
 
     def __init__(
         self,
-        definition_repo: SqlAlchemyMetricDefinitionRepository,
-        metric_repo: SqlAlchemyCustomerMetricRepository,
-        history_repo: SqlAlchemyCustomerMetricHistoryRepository,
-        customer_repo: SqlAlchemyCustomerRepository | None = None,
+        definition_repo: MetricDefinitionRepository,
+        metric_repo: CustomerMetricRepository,
+        history_repo: CustomerMetricHistoryRepository,
+        customer_repo: CustomerRepository | None = None,
     ) -> None:
         self._definition_repo = definition_repo
         self._metric_repo = metric_repo
         self._history_repo = history_repo
         self._customer_repo = customer_repo
 
-    async def get_catalog(self, permissions: list[str]) -> list[CatalogEntryDTO]:
+    async def get_catalog(self, ctx: CallerContext) -> list[CatalogEntryDTO]:
         """Return the full metric definitions catalog.
 
         Gate 2: requires ``metrics.catalog.read`` permission.
         """
-        if "metrics.catalog.read" not in permissions:
-            raise ForbiddenError("metrics.catalog.read")
+        ctx.require_permission("metrics.catalog.read")
 
         definitions = await self._definition_repo.list_all()
         return [
@@ -55,13 +55,12 @@ class MetricQueryService:
             for d in definitions
         ]
 
-    async def get_customer_metrics(self, customer_id: UUID, permissions: list[str]) -> list[CustomerMetricDTO]:
+    async def get_customer_metrics(self, customer_id: UUID, ctx: CallerContext) -> list[CustomerMetricDTO]:
         """Return all pre-computed metric values for a customer.
 
         Gate 2: requires ``metrics.read`` permission.
         """
-        if "metrics.read" not in permissions:
-            raise ForbiddenError("metrics.read")
+        ctx.require_permission("metrics.read")
 
         if self._customer_repo is not None:
             customer = await self._customer_repo.get_by_id(customer_id)
@@ -71,10 +70,10 @@ class MetricQueryService:
         metrics = await self._metric_repo.get_for_customer(customer_id)
         return [
             CustomerMetricDTO(
-                metric_id=m.metric_definition_id,
+                metric_definition_id=m.metric_definition_id,
                 metric_name=m.metric_definition.name,
                 display_name=m.metric_definition.display_name,
-                value=m.metric_value,
+                metric_value=m.metric_value,
                 unit=m.metric_definition.unit,
                 description=m.metric_definition.description,
                 value_type=m.metric_definition.value_type,
@@ -91,7 +90,7 @@ class MetricQueryService:
         since: datetime | None,
         until: datetime | None,
         limit: int,
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> CustomerMetricTrendDTO:
         """Return historical trend data for a specific customer metric.
 
@@ -100,8 +99,7 @@ class MetricQueryService:
         Raises:
             NotFoundError: If the metric definition does not exist.
         """
-        if "metrics.read" not in permissions:
-            raise ForbiddenError("metrics.read")
+        ctx.require_permission("metrics.read")
 
         if self._customer_repo is not None:
             customer = await self._customer_repo.get_by_id(customer_id)
@@ -122,7 +120,7 @@ class MetricQueryService:
 
         data_points = [
             TrendPointDTO(
-                value=h.metric_value,
+                metric_value=h.metric_value,
                 recorded_at=h.recorded_at,
             )
             for h in history
@@ -130,7 +128,7 @@ class MetricQueryService:
 
         return CustomerMetricTrendDTO(
             customer_id=customer_id,
-            metric_id=metric_id,
+            metric_definition_id=metric_id,
             metric_name=definition.name,
             display_name=definition.display_name,
             unit=definition.unit,
@@ -146,8 +144,7 @@ class MetricQueryService:
         name: str,
         display_name: str,
         value_type: str,
-        permissions: list[str],
-        current_user_id: UUID,
+        ctx: CallerContext,
         description: str | None = None,
         unit: str | None = None,
     ) -> CatalogEntryDTO:
@@ -159,8 +156,7 @@ class MetricQueryService:
             ForbiddenError: If the caller lacks metrics.catalog.manage.
             ConflictError: If a metric with the same name already exists.
         """
-        if "metrics.catalog.manage" not in permissions:
-            raise ForbiddenError("metrics.catalog.manage")
+        ctx.require_permission("metrics.catalog.manage")
 
         existing = await self._definition_repo.get_by_name(name)
         if existing is not None:
@@ -172,8 +168,8 @@ class MetricQueryService:
             description=description,
             unit=unit,
             value_type=value_type,
-            created_by=current_user_id,
-            updated_by=current_user_id,
+            created_by=ctx.user_id,
+            updated_by=ctx.user_id,
         )
         model = await self._definition_repo.create(model)
 
@@ -190,8 +186,7 @@ class MetricQueryService:
         self,
         metric_id: UUID,
         updates: dict,
-        permissions: list[str],
-        current_user_id: UUID,
+        ctx: CallerContext,
     ) -> CatalogEntryDTO:
         """Partially update a metric definition.
 
@@ -201,8 +196,7 @@ class MetricQueryService:
             ForbiddenError: If the caller lacks metrics.catalog.manage.
             NotFoundError: If the metric definition does not exist or is soft-deleted.
         """
-        if "metrics.catalog.manage" not in permissions:
-            raise ForbiddenError("metrics.catalog.manage")
+        ctx.require_permission("metrics.catalog.manage")
 
         definition = await self._definition_repo.get_by_id(metric_id)
         if definition is None:
@@ -213,7 +207,7 @@ class MetricQueryService:
             if field in updates and updates[field] is not None:
                 setattr(definition, field, updates[field])
 
-        definition.updated_by = current_user_id
+        definition.updated_by = ctx.user_id
         definition = await self._definition_repo.update(definition)
 
         return CatalogEntryDTO(
@@ -228,8 +222,7 @@ class MetricQueryService:
     async def delete_metric_definition(
         self,
         metric_id: UUID,
-        permissions: list[str],
-        current_user_id: UUID,
+        ctx: CallerContext,
     ) -> None:
         """Soft-delete a metric definition.
 
@@ -239,11 +232,10 @@ class MetricQueryService:
             ForbiddenError: If the caller lacks metrics.catalog.manage.
             NotFoundError: If the metric definition does not exist or is already soft-deleted.
         """
-        if "metrics.catalog.manage" not in permissions:
-            raise ForbiddenError("metrics.catalog.manage")
+        ctx.require_permission("metrics.catalog.manage")
 
         definition = await self._definition_repo.get_by_id(metric_id)
         if definition is None:
             raise NotFoundError("MetricDefinition", metric_id)
 
-        await self._definition_repo.soft_delete(metric_id, deleted_by=current_user_id)
+        await self._definition_repo.soft_delete(metric_id, deleted_by=ctx.user_id)

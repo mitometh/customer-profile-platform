@@ -3,16 +3,17 @@
 from uuid import UUID
 
 from app.application.dtos.role import PermissionDTO, RoleDetailDTO, RoleSummaryDTO
-from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
+from app.core.context import CallerContext
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.protocols import RoleRepository
 from app.core.types import PaginatedResult, Pagination
 from app.infrastructure.models.role import RoleModel
-from app.infrastructure.repositories.role import SqlAlchemyRoleRepository
 
 
 class RoleService:
     """CRUD operations for role management. Gate 2 permission checks at top of every method."""
 
-    def __init__(self, role_repo: SqlAlchemyRoleRepository) -> None:
+    def __init__(self, role_repo: RoleRepository) -> None:
         self._role_repo = role_repo
 
     # ------------------------------------------------------------------
@@ -21,14 +22,13 @@ class RoleService:
 
     async def list_permissions(
         self,
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> list[PermissionDTO]:
         """List all available permissions.
 
         Gate 2: requires 'roles.read' permission.
         """
-        if "roles.read" not in permissions:
-            raise ForbiddenError("roles.read")
+        ctx.require_permission("roles.read")
 
         perm_models = await self._role_repo.get_all_permissions()
         return [PermissionDTO(id=p.id, code=p.code, description=p.description) for p in perm_models]
@@ -40,14 +40,13 @@ class RoleService:
     async def list_roles(
         self,
         pagination: Pagination,
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> PaginatedResult[RoleSummaryDTO]:
         """List all roles with permission counts.
 
         Gate 2: requires 'roles.read' permission.
         """
-        if "roles.read" not in permissions:
-            raise ForbiddenError("roles.read")
+        ctx.require_permission("roles.read")
 
         result = await self._role_repo.list_roles(pagination)
 
@@ -66,14 +65,13 @@ class RoleService:
     async def get_role(
         self,
         role_id: UUID,
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> RoleDetailDTO:
         """Get role detail with full permission list and user count.
 
         Gate 2: requires 'roles.read' permission.
         """
-        if "roles.read" not in permissions:
-            raise ForbiddenError("roles.read")
+        ctx.require_permission("roles.read")
 
         role = await self._role_repo.get_by_id(role_id)
         if role is None:
@@ -87,7 +85,7 @@ class RoleService:
         display_name: str,
         description: str | None,
         permission_ids: list[UUID],
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> RoleDetailDTO:
         """Create a new custom role with specified permissions.
 
@@ -98,8 +96,7 @@ class RoleService:
             ConflictError: Role name already exists.
             ValidationError: Invalid permission IDs.
         """
-        if "roles.manage" not in permissions:
-            raise ForbiddenError("roles.manage")
+        ctx.require_permission("roles.manage")
 
         # Check name uniqueness
         if await self._role_repo.name_exists(name):
@@ -128,7 +125,7 @@ class RoleService:
         self,
         role_id: UUID,
         updates: dict,
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> RoleDetailDTO:
         """Update role details and/or permission assignments.
 
@@ -139,8 +136,7 @@ class RoleService:
             NotFoundError: Role not found.
             ValidationError: Invalid permission IDs or empty permission set.
         """
-        if "roles.manage" not in permissions:
-            raise ForbiddenError("roles.manage")
+        ctx.require_permission("roles.manage")
 
         role = await self._role_repo.get_by_id(role_id)
         if role is None:
@@ -167,8 +163,7 @@ class RoleService:
     async def delete_role(
         self,
         role_id: UUID,
-        permissions: list[str],
-        deleted_by: UUID,
+        ctx: CallerContext,
     ) -> None:
         """Soft-delete a custom role.
 
@@ -179,8 +174,7 @@ class RoleService:
             NotFoundError: Role not found.
             ValidationError: System role or role with assigned users.
         """
-        if "roles.manage" not in permissions:
-            raise ForbiddenError("roles.manage")
+        ctx.require_permission("roles.manage")
 
         role = await self._role_repo.get_by_id(role_id)
         if role is None:
@@ -198,7 +192,7 @@ class RoleService:
                 "Reassign users to another role before deleting."
             )
 
-        await self._role_repo.soft_delete(role_id, deleted_by=deleted_by)
+        await self._role_repo.soft_delete(role_id, deleted_by=ctx.user_id)
 
     # ------------------------------------------------------------------
     # Helpers

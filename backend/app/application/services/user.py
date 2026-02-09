@@ -3,11 +3,11 @@
 from uuid import UUID
 
 from app.application.dtos.auth import UserSummaryDTO
-from app.core.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
+from app.core.context import CallerContext
+from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.protocols import RoleRepository, UserRepository
 from app.core.types import PaginatedResult, Pagination
 from app.infrastructure.models.user import UserModel
-from app.infrastructure.repositories.role import SqlAlchemyRoleRepository
-from app.infrastructure.repositories.user import SqlAlchemyUserRepository
 from app.infrastructure.security import hash_password
 
 
@@ -16,8 +16,8 @@ class UserService:
 
     def __init__(
         self,
-        user_repo: SqlAlchemyUserRepository,
-        role_repo: SqlAlchemyRoleRepository,
+        user_repo: UserRepository,
+        role_repo: RoleRepository,
     ) -> None:
         self._user_repo = user_repo
         self._role_repo = role_repo
@@ -28,7 +28,7 @@ class UserService:
         full_name: str,
         role: str,
         password: str,
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> UserSummaryDTO:
         """Create a new user.
 
@@ -40,8 +40,7 @@ class UserService:
             ConflictError: If the email is already in use.
         """
         # Gate 2
-        if "users.manage" not in permissions:
-            raise ForbiddenError("users.manage")
+        ctx.require_permission("users.manage")
 
         # Validate role exists
         role_obj = await self._role_repo.get_by_name(role)
@@ -68,8 +67,7 @@ class UserService:
         self,
         user_id: UUID,
         updates: dict,
-        permissions: list[str],
-        current_user_id: UUID,
+        ctx: CallerContext,
     ) -> UserSummaryDTO:
         """Partially update a user (role, is_active, full_name).
 
@@ -81,8 +79,7 @@ class UserService:
             ValidationError: If the role does not exist or deactivating the last admin.
         """
         # Gate 2
-        if "users.manage" not in permissions:
-            raise ForbiddenError("users.manage")
+        ctx.require_permission("users.manage")
 
         user = await self._user_repo.get_by_id(user_id)
         if user is None:
@@ -119,7 +116,7 @@ class UserService:
     async def list_users(
         self,
         pagination: Pagination,
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> PaginatedResult[UserSummaryDTO]:
         """Return a paginated list of users.
 
@@ -129,8 +126,7 @@ class UserService:
             ForbiddenError: If the caller lacks users.read.
         """
         # Gate 2
-        if "users.read" not in permissions:
-            raise ForbiddenError("users.read")
+        ctx.require_permission("users.read")
 
         result = await self._user_repo.list_users(pagination)
 

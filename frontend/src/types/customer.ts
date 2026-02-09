@@ -17,10 +17,13 @@ export interface CustomerDetail {
   company_name: string;
   contact_name: string;
   email: string;
+  phone: string | null;
+  industry: string | null;
   contract_value: number;
   currency_code: string;
   signup_date: string;
   source_name: string | null;
+  notes: string | null;
   created_at: string;
   updated_at: string;
   recent_events: EventSummary[];

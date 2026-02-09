@@ -14,9 +14,12 @@ from app.agent.orchestrator import OrchestratorAgent
 from app.agent.rbac import filter_tools_by_permissions, get_capabilities_summary
 from app.agent.tools import TOOL_DEFINITIONS
 from app.application.dtos.chat import ChatResponseDTO, SourceAttribution, ToolCallAttribution
-from app.core.exceptions import ForbiddenError, LLMUnavailableError, NotFoundError
+from app.core.context import CallerContext
+from app.core.exceptions import LLMUnavailableError, NotFoundError
+from app.core.protocols import ChatSessionRepository
+from sqlalchemy.orm.attributes import set_committed_value
+
 from app.infrastructure.models.chat import ChatSessionModel
-from app.infrastructure.repositories.chat import SqlAlchemyChatSessionRepository
 
 logger = logging.getLogger(__name__)
 
@@ -30,21 +33,19 @@ class ChatService:
 
     def __init__(
         self,
-        chat_repo: SqlAlchemyChatSessionRepository,
+        chat_repo: ChatSessionRepository,
         client: AnthropicClient,
+        session: AsyncSession,
     ) -> None:
         self._chat_repo = chat_repo
         self._client = client
+        self._session = session
 
     async def process_message(
         self,
-        user_id: UUID,
+        ctx: CallerContext,
         session_id: UUID | None,
         message: str,
-        permissions: list[str],
-        user_name: str,
-        role_name: str,
-        db: AsyncSession,
     ) -> ChatResponseDTO:
         """Process a chat message end-to-end.
 
@@ -63,23 +64,22 @@ class ChatService:
             LLMUnavailableError: If the LLM provider is unreachable.
         """
         # Gate 2: check chat.use permission
-        if "chat.use" not in permissions:
-            raise ForbiddenError("chat.use")
+        ctx.require_permission("chat.use")
 
         # Get or create session
-        chat_session = await self._resolve_session(user_id, session_id)
+        chat_session = await self._resolve_session(ctx.user_id, session_id)
 
         # Load conversation history from existing messages
         conversation_history = self._build_conversation_history(chat_session)
 
         # Gate 1: filter tools by user permissions
-        available_tools = filter_tools_by_permissions(TOOL_DEFINITIONS, permissions)
-        capabilities_summary = get_capabilities_summary(permissions)
+        available_tools = filter_tools_by_permissions(TOOL_DEFINITIONS, ctx)
+        capabilities_summary = get_capabilities_summary(ctx)
 
         # Build user context for the orchestrator
         user_context = {
-            "user_name": user_name,
-            "role": role_name,
+            "user_name": ctx.full_name,
+            "role": ctx.role,
             "capabilities_summary": capabilities_summary,
             "available_tools": available_tools,
         }
@@ -91,8 +91,8 @@ class ChatService:
                 user_message=message,
                 conversation_history=conversation_history,
                 user_context=user_context,
-                session=db,
-                permissions=permissions,
+                session=self._session,
+                ctx=ctx,
             )
         except LLMUnavailableError:
             # Re-raise so the global error handler returns 503
@@ -177,7 +177,10 @@ class ChatService:
             is_active=True,
             message_count=0,
         )
-        return await self._chat_repo.create(new_session)
+        created = await self._chat_repo.create(new_session)
+        # Prevent lazy-load of messages for a brand-new session (MissingGreenlet in async)
+        set_committed_value(created, "messages", [])
+        return created
 
     @staticmethod
     def _build_conversation_history(

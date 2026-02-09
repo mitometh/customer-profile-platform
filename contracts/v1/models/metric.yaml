@@ -73,10 +73,31 @@ responses:
       unit: "score"
       value_type: "decimal"
 
+  # --- Health Score Formula ---
+  # Defined here as the canonical reference for seed, scheduler, and tests.
+  health_score_formula:
+    base: 70
+    bonuses:
+      - condition: "any 'meeting' event in the last 30 days"
+        value: +10
+      - condition: "any 'usage_event' in the last 30 days"
+        value: +10
+    penalties:
+      - condition: "per 'support_ticket' event in the last 30 days"
+        value: -5
+        cap: none
+      - condition: "no events of any type in the last 14 days"
+        value: -10
+    clamp: [0, 100]
+    thresholds:
+      healthy: ">= 70"
+      needs_attention: "40-69"
+      at_risk: "< 40"
+
   CustomerMetricValue:
     desc: Metric value enriched with its definition, for a specific customer.
     used_by: "GET /api/customers/{id}/metrics, embedded in CustomerDetail"
-    fields: [metric_definition_id, metric_name, display_name, metric_value, unit, description, note?, updated_at]
+    fields: [metric_definition_id, metric_name, display_name, metric_value, unit, description, value_type, note?, updated_at]
     notes:
       metric_name: "Resolved from metric_definitions join on metric_definition_id"
       display_name: "Resolved from metric_definitions join on metric_definition_id"
@@ -95,7 +116,7 @@ responses:
   CustomerMetricTrend:
     desc: Time-series data for a specific metric on a specific customer.
     used_by: "GET /api/customers/{id}/metrics/{metric_id}/history"
-    fields: [metric_definition_id, metric_name, display_name, unit, data_points]
+    fields: [customer_id, metric_definition_id, metric_name, display_name, unit, data_points]
     embedded:
       data_points:
         type: "MetricDataPoint[]"

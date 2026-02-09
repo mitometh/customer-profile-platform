@@ -36,6 +36,10 @@ class MetricDefinitionModel(Base, TimestampMixin, AuditMixin, SoftDeleteMixin):
     unit: Mapped[str | None] = mapped_column(String(50), nullable=True)
     value_type: Mapped[str] = mapped_column(String(20), nullable=False)
 
+    __table_args__ = (
+        Index("ix_metric_definitions_deleted_at", "deleted_at"),
+    )
+
 
 class CustomerMetricModel(Base, TimestampMixin, AuditMixin, SoftDeleteMixin):
     __tablename__ = "customer_metrics"
@@ -54,6 +58,8 @@ class CustomerMetricModel(Base, TimestampMixin, AuditMixin, SoftDeleteMixin):
             "metric_definition_id",
             name="uq_customer_metric_definition",
         ),
+        Index("ix_customer_metrics_customer_id", "customer_id"),
+        Index("ix_customer_metrics_deleted_at", "deleted_at"),
     )
 
     # --- Relationships ---

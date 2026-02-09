@@ -31,6 +31,8 @@ export function CustomerProfile({
         </a>
       ),
     },
+    ...(customer.phone ? [{ label: "Phone", value: customer.phone }] : []),
+    ...(customer.industry ? [{ label: "Industry", value: customer.industry }] : []),
     {
       label: "Contract Value",
       value: formatCurrency(customer.contract_value, customer.currency_code),

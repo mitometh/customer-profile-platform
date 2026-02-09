@@ -79,7 +79,7 @@ const icons: Record<ToastType, () => preact.JSX.Element> = {
 
 export function ToastProvider({ children }: { children: ComponentChildren }): preact.JSX.Element {
   const [toasts, setToasts] = useState<ToastEntry[]>([]);
-  const nextId = useRef(0);
+  const nextIdRef = useRef(0);
   const timersRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
 
   const removeToast = useCallback((id: number): void => {
@@ -92,7 +92,7 @@ export function ToastProvider({ children }: { children: ComponentChildren }): pr
   }, []);
 
   const showToast = useCallback((options: ToastOptions): void => {
-    const id = nextId.current++;
+    const id = nextIdRef.current++;
     const entry: ToastEntry = { id, ...options };
 
     setToasts((prev) => {

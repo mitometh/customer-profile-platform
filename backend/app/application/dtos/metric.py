@@ -22,10 +22,10 @@ class CatalogEntryDTO:
 class CustomerMetricDTO:
     """A customer's current value for a specific metric, enriched with definition info."""
 
-    metric_id: UUID
+    metric_definition_id: UUID
     metric_name: str
     display_name: str
-    value: Decimal
+    metric_value: Decimal
     unit: str | None
     description: str | None
     value_type: str
@@ -37,7 +37,7 @@ class CustomerMetricDTO:
 class TrendPointDTO:
     """A single historical data point in a metric trend."""
 
-    value: Decimal
+    metric_value: Decimal
     recorded_at: datetime
 
 
@@ -46,7 +46,7 @@ class CustomerMetricTrendDTO:
     """Time-series trend data for a specific customer metric."""
 
     customer_id: UUID
-    metric_id: UUID
+    metric_definition_id: UUID
     metric_name: str
     display_name: str
     unit: str | None

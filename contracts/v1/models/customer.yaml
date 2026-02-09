@@ -49,7 +49,7 @@ responses:
   CustomerDetail:
     desc: "Full customer 360 view: profile + recent events + metrics."
     used_by: GET /api/customers/{id}
-    fields: [id, company_name, contact_name, email, contract_value, currency_code, signup_date, source_name?, created_at, updated_at, recent_events, metrics]
+    fields: [id, company_name, contact_name, email, phone?, industry?, contract_value, currency_code, signup_date, source_name?, notes?, created_at, updated_at, recent_events, metrics]
     embedded:
       recent_events: { type: "EventSummary[]", ref: event.yaml#EventSummary, desc: "Last 10 events, desc by occurred_at" }
       metrics:       { type: "CustomerMetricValue[]", ref: metric.yaml#CustomerMetricValue }

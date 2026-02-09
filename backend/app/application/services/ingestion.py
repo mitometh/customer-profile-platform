@@ -7,13 +7,9 @@ from typing import Any
 from uuid import uuid4
 
 from app.core.exceptions import UnauthorizedError
-from app.infrastructure.broker import EXCHANGE_NAME, RabbitMQPublisher
+from app.core.protocols import MessagePublisher, SourceRepository, TokenCache
 
 logger = logging.getLogger(__name__)
-from app.infrastructure.repositories.source import (
-    RedisTokenCache,
-    SqlAlchemySourceRepository,
-)
 
 
 class IngestionService:
@@ -21,9 +17,9 @@ class IngestionService:
 
     def __init__(
         self,
-        source_repo: SqlAlchemySourceRepository,
-        token_cache: RedisTokenCache,
-        broker: RabbitMQPublisher,
+        source_repo: SourceRepository,
+        token_cache: TokenCache,
+        broker: MessagePublisher,
     ) -> None:
         self._source_repo = source_repo
         self._token_cache = token_cache
@@ -94,7 +90,7 @@ class IngestionService:
         }
 
         try:
-            await self._broker.publish(exchange=EXCHANGE_NAME, message=envelope)
+            await self._broker.publish(message=envelope)
         except RuntimeError:
             logger.error("RabbitMQ publisher not connected — event %s was not published", event_id)
             raise

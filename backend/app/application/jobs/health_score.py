@@ -4,11 +4,10 @@ Runs daily at 02:15 UTC via the scheduler.
 
 Formula:
     Base score: 70
-    + Recent activity bonus:
-        +15 if any event in last 7 days
-        +5  if any event in last 30 days (but not in last 7)
-    - Support ticket penalty:
-        -5 per support ticket in last 30 days (capped at -25)
+    +10 if any meeting event in the last 30 days
+    +10 if any usage_event in the last 30 days
+    -5 per support ticket in the last 30 days (uncapped)
+    -10 if no events at all in the last 14 days
     Clamped to [0, 100].
 
 Errors are handled per-customer so a single failure does not abort the
@@ -34,12 +33,12 @@ from app.infrastructure.repositories.metric import (
 
 logger = get_logger("job.health_score")
 
-# Formula constants
+# Formula constants — aligned with seeds/seed.py
 BASE_SCORE = 70
-RECENT_7D_BONUS = 15
-RECENT_30D_BONUS = 5
+MEETING_BONUS = 10
+USAGE_BONUS = 10
 TICKET_PENALTY_PER = 5
-TICKET_PENALTY_CAP = 25
+NO_RECENT_PENALTY = 10
 SCORE_MIN = 0
 SCORE_MAX = 100
 
@@ -77,7 +76,7 @@ async def _compute_all(session: AsyncSession) -> None:
     history_repo = SqlAlchemyCustomerMetricHistoryRepository(session)
 
     now = datetime.now(UTC)
-    seven_days_ago = now - timedelta(days=7)
+    fourteen_days_ago = now - timedelta(days=14)
     thirty_days_ago = now - timedelta(days=30)
 
     processed = 0
@@ -85,7 +84,7 @@ async def _compute_all(session: AsyncSession) -> None:
 
     for customer in customers:
         try:
-            score = await _compute_score(session, customer.id, seven_days_ago, thirty_days_ago)
+            score = await _compute_score(session, customer.id, fourteen_days_ago, thirty_days_ago)
 
             # Upsert customer_metrics
             await metric_repo.upsert(customer.id, metric_def.id, score)
@@ -112,42 +111,51 @@ async def _compute_all(session: AsyncSession) -> None:
 async def _compute_score(
     session: AsyncSession,
     customer_id: object,
-    seven_days_ago: datetime,
+    fourteen_days_ago: datetime,
     thirty_days_ago: datetime,
 ) -> Decimal:
     """Compute the composite health score for a single customer.
+
+    Formula (aligned with seed script):
+        Base 70
+        +10 if meetings in last 30d
+        +10 if usage_events in last 30d
+        -5 per support ticket in last 30d
+        -10 if no events in last 14d
+        Clamped [0, 100]
 
     Returns:
         Decimal value clamped to [0, 100].
     """
     score = BASE_SCORE
 
-    # --- Recent activity bonus ---
-    events_7d_result = await session.execute(
+    # --- Meeting bonus: +10 if any meeting in last 30d ---
+    meetings_result = await session.execute(
         select(func.count(EventModel.id)).where(
             EventModel.customer_id == customer_id,
-            EventModel.occurred_at >= seven_days_ago,
+            EventModel.event_type == "meeting",
+            EventModel.occurred_at >= thirty_days_ago,
             EventModel.deleted_at.is_(None),
         )
     )
-    events_7d = events_7d_result.scalar() or 0
+    has_meetings = (meetings_result.scalar() or 0) > 0
+    if has_meetings:
+        score += MEETING_BONUS
 
-    if events_7d > 0:
-        score += RECENT_7D_BONUS
-    else:
-        # Check 30-day window only if no 7-day activity
-        events_30d_result = await session.execute(
-            select(func.count(EventModel.id)).where(
-                EventModel.customer_id == customer_id,
-                EventModel.occurred_at >= thirty_days_ago,
-                EventModel.deleted_at.is_(None),
-            )
+    # --- Usage event bonus: +10 if any usage_event in last 30d ---
+    usage_result = await session.execute(
+        select(func.count(EventModel.id)).where(
+            EventModel.customer_id == customer_id,
+            EventModel.event_type == "usage_event",
+            EventModel.occurred_at >= thirty_days_ago,
+            EventModel.deleted_at.is_(None),
         )
-        events_30d = events_30d_result.scalar() or 0
-        if events_30d > 0:
-            score += RECENT_30D_BONUS
+    )
+    has_usage = (usage_result.scalar() or 0) > 0
+    if has_usage:
+        score += USAGE_BONUS
 
-    # --- Support ticket penalty ---
+    # --- Support ticket penalty: -5 per ticket in last 30d (uncapped) ---
     tickets_result = await session.execute(
         select(func.count(EventModel.id)).where(
             EventModel.customer_id == customer_id,
@@ -157,8 +165,19 @@ async def _compute_score(
         )
     )
     ticket_count = tickets_result.scalar() or 0
-    ticket_penalty = min(ticket_count * TICKET_PENALTY_PER, TICKET_PENALTY_CAP)
-    score -= ticket_penalty
+    score -= ticket_count * TICKET_PENALTY_PER
+
+    # --- No recent activity penalty: -10 if no events in last 14d ---
+    recent_result = await session.execute(
+        select(func.count(EventModel.id)).where(
+            EventModel.customer_id == customer_id,
+            EventModel.occurred_at >= fourteen_days_ago,
+            EventModel.deleted_at.is_(None),
+        )
+    )
+    has_recent = (recent_result.scalar() or 0) > 0
+    if not has_recent:
+        score -= NO_RECENT_PENALTY
 
     # Clamp to [0, 100]
     score = max(SCORE_MIN, min(SCORE_MAX, score))

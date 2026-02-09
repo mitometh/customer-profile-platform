@@ -38,12 +38,6 @@ export function RoleDetail({
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  useEffect(() => {
-    if (isOpen && roleId) {
-      loadRole();
-    }
-  }, [isOpen, roleId]);
-
   const loadRole = async (): Promise<void> => {
     setIsLoading(true);
     setError(null);
@@ -60,6 +54,12 @@ export function RoleDetail({
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (isOpen && roleId) {
+      loadRole();
+    }
+  }, [isOpen, roleId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleEdit = (): void => {
     setIsFormOpen(true);
