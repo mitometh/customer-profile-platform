@@ -196,8 +196,10 @@ async def seeded_roles(db: AsyncSession):
     await db.flush()
 
     # Roles
-    admin_role = RoleModel(id=uuid4(), name="admin", display_name="Admin", description="Full access")
-    sales_role = RoleModel(id=uuid4(), name="sales", display_name="Sales", description="Sales team")
+    admin_role = RoleModel(id=uuid4(), name="admin",
+                           display_name="Admin", description="Full access")
+    sales_role = RoleModel(id=uuid4(), name="sales",
+                           display_name="Sales", description="Sales team")
     db.add_all([admin_role, sales_role])
     await db.flush()
 
@@ -207,7 +209,8 @@ async def seeded_roles(db: AsyncSession):
 
     # Sales gets limited permissions
     for code in ["customers.read", "events.read", "metrics.read", "metrics.catalog.read", "chat.use"]:
-        db.add(RolePermissionModel(role_id=sales_role.id, permission_id=perms[code].id))
+        db.add(RolePermissionModel(
+            role_id=sales_role.id, permission_id=perms[code].id))
 
     await db.flush()
 
@@ -223,7 +226,7 @@ async def admin_user(db: AsyncSession, seeded_roles):
         id=uuid4(),
         email="admin@test.com",
         full_name="Test Admin",
-        password_hash=hash_password("password123"),
+        password_hash=hash_password("Password123"),
         role_id=seeded_roles["admin"].id,
         is_active=True,
     )
@@ -244,7 +247,7 @@ async def sales_user(db: AsyncSession, seeded_roles):
         id=uuid4(),
         email="sales@test.com",
         full_name="Test Sales",
-        password_hash=hash_password("password123"),
+        password_hash=hash_password("Password123"),
         role_id=seeded_roles["sales"].id,
         is_active=True,
     )

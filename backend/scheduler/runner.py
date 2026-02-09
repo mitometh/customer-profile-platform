@@ -1,28 +1,32 @@
-"""Scheduler entry point. Runs daily cron jobs for metric recomputation.
+"""Scheduler entry point. Runs periodic jobs for metric recomputation.
 
 Usage: python -m scheduler.runner
 
 Jobs:
-    - metric_recompute: Recompute support_tickets_last_30d (02:00 UTC)
-    - health_score: Composite health score 0-100 (02:15 UTC)
-    - days_since_contact: now - max(occurred_at) (02:30 UTC)
+    - metric_recompute: Recompute support_tickets_last_30d
+    - health_score: Composite health score 0-100
+    - days_since_contact: now - max(occurred_at)
+
+Interval is controlled by SCHEDULER_INTERVAL_MINUTES env var (default: 1).
 """
 
 import asyncio
 import signal
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from app.config import get_settings
 from app.infrastructure.logging import configure_logging, get_logger
 
 
 async def main() -> None:
-    """Configure and start the scheduler with all daily jobs."""
+    """Configure and start the scheduler with all periodic jobs."""
     settings = get_settings()
     configure_logging(settings.LOG_LEVEL, settings.LOG_FORMAT)
     logger = get_logger("scheduler")
+
+    interval = settings.SCHEDULER_INTERVAL_MINUTES
 
     scheduler = AsyncIOScheduler()
 
@@ -31,29 +35,31 @@ async def main() -> None:
     from app.application.jobs.health_score import run_health_score
     from app.application.jobs.metric_recompute import run_metric_recompute
 
-    # Schedule daily at 2:00 AM UTC
+    trigger = IntervalTrigger(minutes=interval)
+
     scheduler.add_job(
         run_metric_recompute,
-        CronTrigger(hour=2, minute=0),
+        trigger,
         id="metric_recompute",
         name="Recompute support_tickets_last_30d",
     )
     scheduler.add_job(
         run_health_score,
-        CronTrigger(hour=2, minute=15),
+        trigger,
         id="health_score",
         name="Compute composite health score",
     )
     scheduler.add_job(
         run_days_since_contact,
-        CronTrigger(hour=2, minute=30),
+        trigger,
         id="days_since_contact",
         name="Compute days since last contact",
     )
 
     scheduler.start()
     logger.info(
-        "Scheduler started with 3 daily jobs",
+        "Scheduler started — all jobs run every %d minute(s)",
+        interval,
         jobs=["metric_recompute", "health_score", "days_since_contact"],
     )
 

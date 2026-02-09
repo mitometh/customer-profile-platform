@@ -63,7 +63,6 @@ async def run_worker(worker_type: str) -> None:
                     error=str(exc),
                     worker_type=worker_type,
                 )
-            break  # Exit the async generator to ensure session cleanup
 
     await consumer.consume(queue_name, on_message)
 

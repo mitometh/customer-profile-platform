@@ -17,7 +17,7 @@ class TestLogin:
             "/api/auth/login",
             json={
                 "email": user.email,
-                "password": "password123",
+                "password": "Password123",
             },
         )
         assert resp.status_code == 200
@@ -43,7 +43,7 @@ class TestLogin:
             "/api/auth/login",
             json={
                 "email": "nonexistent@test.com",
-                "password": "password123",
+                "password": "Password123",
             },
         )
         assert resp.status_code == 401
