@@ -4,8 +4,6 @@ import redis.asyncio as aioredis
 
 from app.config import get_settings
 
-_redis_client: "AsyncRedisClient | None" = None
-
 
 class AsyncRedisClient:
     """Thin async wrapper around redis.asyncio for cache operations."""
@@ -45,6 +43,14 @@ class AsyncRedisClient:
         """Check whether a key exists."""
         return bool(await self._client.exists(key))
 
+    async def incr(self, key: str) -> int:
+        """Atomically increment a key and return the new value."""
+        return await self._client.incr(key)
+
+    async def expire(self, key: str, seconds: int) -> None:
+        """Set a TTL on an existing key."""
+        await self._client.expire(key, seconds)
+
     async def ping(self) -> bool:
         """Ping Redis to check connectivity."""
         return await self._client.ping()
@@ -54,22 +60,29 @@ class AsyncRedisClient:
         await self._client.aclose()
 
 
+class _RedisHolder:
+    """Module-level state holder. Avoids ``global`` keyword."""
+
+    client: AsyncRedisClient | None = None
+
+
+_holder = _RedisHolder()
+
+
 def get_redis() -> AsyncRedisClient:
     """Return a singleton AsyncRedisClient instance."""
-    global _redis_client
-    if _redis_client is None:
+    if _holder.client is None:
         settings = get_settings()
         client = aioredis.from_url(
             settings.REDIS_URL,
             decode_responses=False,
         )
-        _redis_client = AsyncRedisClient(client)
-    return _redis_client
+        _holder.client = AsyncRedisClient(client)
+    return _holder.client
 
 
 async def close_redis() -> None:
     """Close the global Redis client. Called at shutdown."""
-    global _redis_client
-    if _redis_client is not None:
-        await _redis_client.close()
-        _redis_client = None
+    if _holder.client is not None:
+        await _holder.client.close()
+        _holder.client = None

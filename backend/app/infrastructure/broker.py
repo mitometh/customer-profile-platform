@@ -18,23 +18,27 @@ QUEUE_METRICS = "q.metrics"
 QUEUE_ALERTS = "q.alerts"
 
 
-_publisher: "RabbitMQPublisher | None" = None
+class _BrokerHolder:
+    """Module-level state holder. Avoids ``global`` keyword."""
+
+    publisher: "RabbitMQPublisher | None" = None
+
+
+_holder = _BrokerHolder()
 
 
 def get_publisher() -> "RabbitMQPublisher":
     """Return a singleton RabbitMQPublisher instance."""
-    global _publisher
-    if _publisher is None:
-        _publisher = RabbitMQPublisher()
-    return _publisher
+    if _holder.publisher is None:
+        _holder.publisher = RabbitMQPublisher()
+    return _holder.publisher
 
 
 async def close_publisher() -> None:
     """Close the global publisher. Called at shutdown."""
-    global _publisher
-    if _publisher is not None:
-        await _publisher.close()
-        _publisher = None
+    if _holder.publisher is not None:
+        await _holder.publisher.close()
+        _holder.publisher = None
 
 
 class RabbitMQPublisher:
@@ -56,11 +60,10 @@ class RabbitMQPublisher:
             durable=True,
         )
 
-    async def publish(self, exchange: str, message: dict[str, Any]) -> None:
-        """Publish a JSON-serialised message to the named exchange.
+    async def publish(self, message: dict[str, Any]) -> None:
+        """Publish a JSON-serialised message to the fanout exchange.
 
         Args:
-            exchange: The exchange name (should match EXCHANGE_NAME).
             message: Dict payload to serialise as JSON.
         """
         if self._exchange is None:
@@ -125,9 +128,19 @@ class BaseConsumer:
                 body = json.loads(msg.body.decode("utf-8"))
                 await callback(body)
                 await msg.ack()
+            except json.JSONDecodeError:
+                logger.error("Malformed message body, discarding", extra={"queue": queue_name})
+                await msg.ack()
             except Exception:
-                logger.exception("Message processing failed")
-                await msg.nack(requeue=True)
+                if msg.redelivered:
+                    logger.error(
+                        "Message failed after redelivery, discarding",
+                        extra={"queue": queue_name},
+                    )
+                    await msg.ack()
+                else:
+                    logger.warning("Message processing failed, requeuing", extra={"queue": queue_name})
+                    await msg.nack(requeue=True)
 
         await queue.consume(_on_message)
 
