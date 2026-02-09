@@ -1,10 +1,19 @@
 """DTOs for the identity & access context."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
-from app.api.dependencies import CurrentUserDTO
+
+@dataclass(frozen=True)
+class CurrentUserDTO:
+    """Lightweight representation of the authenticated user, available via DI."""
+
+    id: UUID
+    email: str
+    full_name: str
+    role: str
+    permissions: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
