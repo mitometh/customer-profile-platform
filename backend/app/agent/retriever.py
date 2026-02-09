@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.client import AnthropicClient
 from app.agent.prompts import RETRIEVER_SYSTEM_PROMPT
 from app.agent.tools import execute_tool
+from app.core.context import CallerContext
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ class RetrieverAgent:
         data_request: str,
         tools: list[dict],
         session: AsyncSession,
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> dict:
         """Execute tools to fetch requested data.
 
@@ -36,7 +37,7 @@ class RetrieverAgent:
             data_request: Natural language description of needed data.
             tools: Gate-1-filtered tool definitions.
             session: Active database session.
-            permissions: User's permission list for Gate 2 checks.
+            ctx: Caller context for Gate 2 permission checks in tools.
 
         Returns:
             A dict with ``tool_results`` (list of {tool, input, result} dicts)
@@ -77,7 +78,7 @@ class RetrieverAgent:
                     tool_name=tool_block.name,
                     tool_input=tool_block.input,
                     session=session,
-                    permissions=permissions,
+                    ctx=ctx,
                 )
 
                 all_tool_results.append(

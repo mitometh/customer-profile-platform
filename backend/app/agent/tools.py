@@ -40,10 +40,15 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Tool definitions (Anthropic JSON Schema format)
+# Retriever tool definitions (Anthropic JSON Schema format)
+#
+# These tools are ONLY used by the RetrieverAgent. The OrchestratorAgent
+# has its own meta-tool (``request_data``) defined in orchestrator.py.
+# Gate 1 (rbac.py) filters this list by user permissions before passing
+# it to the retriever.
 # ---------------------------------------------------------------------------
 
-TOOL_DEFINITIONS: list[dict] = [
+RETRIEVER_TOOL_DEFINITIONS: list[dict] = [
     {
         "name": "lookup_customer",
         "description": (

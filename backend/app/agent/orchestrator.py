@@ -2,8 +2,8 @@
 
 The orchestrator is the primary AI agent that:
 1. Receives user messages plus conversation history.
-2. Decides whether to respond directly (casual/AB-5) or call tools (data questions).
-3. Executes the full tool-call loop when the LLM requests tool use.
+2. Decides whether to respond directly (casual/AB-5) or request data (data questions).
+3. Delegates data retrieval to the RetrieverAgent via the ``request_data`` meta-tool.
 4. Synthesises the final human-readable response with source attribution (AB-4).
 5. Applies sliding-window truncation for long conversations (AB-9).
 """
@@ -17,15 +17,46 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.client import AnthropicClient
 from app.agent.prompts import ORCHESTRATOR_SYSTEM_PROMPT
-from app.agent.tools import execute_tool
+from app.agent.retriever import RetrieverAgent
 from app.core.context import CallerContext
 
 logger = logging.getLogger(__name__)
 
 # AB-9: Maximum number of messages to keep in the sliding window.
 MAX_CONVERSATION_MESSAGES = 20
-# Maximum tool-call iterations to prevent infinite loops.
-MAX_TOOL_ITERATIONS = 10
+# Maximum data-request iterations to prevent infinite loops.
+MAX_DATA_REQUEST_ITERATIONS = 5
+
+# ---------------------------------------------------------------------------
+# Meta-tool: the only tool the orchestrator LLM sees.
+# When the LLM calls this, the orchestrator delegates to the RetrieverAgent.
+# ---------------------------------------------------------------------------
+
+REQUEST_DATA_TOOL: dict = {
+    "name": "request_data",
+    "description": (
+        "Request data from the Customer 360 platform. Describe what data you "
+        "need in natural language and the data retrieval system will fetch it "
+        "using the appropriate database queries. You can request customer info, "
+        "events, metrics, data source status, and more. Be specific about what "
+        "you need (e.g., customer names, IDs, date ranges, metric types)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "description": {
+                "type": "string",
+                "description": (
+                    "A clear, specific description of the data you need. "
+                    "Include any known identifiers (customer IDs, names), "
+                    "filters (date ranges, event types), and what fields "
+                    "you want returned."
+                ),
+            },
+        },
+        "required": ["description"],
+    },
+}
 
 
 class OrchestratorAgent:
@@ -33,6 +64,7 @@ class OrchestratorAgent:
 
     def __init__(self, client: AnthropicClient) -> None:
         self._client = client
+        self._retriever = RetrieverAgent(client)
 
     async def process_message(
         self,
@@ -74,20 +106,23 @@ class OrchestratorAgent:
             if messages and messages[0]["role"] != "user":
                 messages = messages[1:]
 
-        # Gate 1 filtered tools
+        # Gate 1 filtered tools — passed to the retriever, not the orchestrator LLM
         available_tools = user_context.get("available_tools", [])
 
-        # --- Full tool-call loop ---
-        # The orchestrator LLM may request tool calls. We execute them and
-        # feed the results back until the LLM produces a final text response.
+        # The orchestrator LLM only sees the request_data meta-tool
+        orchestrator_tools = [REQUEST_DATA_TOOL] if available_tools else []
+
+        # --- Data-request loop ---
+        # The orchestrator LLM may request data multiple times before it has
+        # enough information to synthesise a final response.
         sources: list[dict] = []
         tool_calls: list[dict] = []
 
-        for _ in range(MAX_TOOL_ITERATIONS):
+        for _ in range(MAX_DATA_REQUEST_ITERATIONS):
             response = await self._client.create_message(
                 system=system,
                 messages=messages,
-                tools=available_tools if available_tools else None,
+                tools=orchestrator_tools if orchestrator_tools else None,
             )
 
             # Separate content blocks by type
@@ -95,7 +130,7 @@ class OrchestratorAgent:
             text_blocks = [block for block in response.content if block.type == "text"]
 
             if not tool_use_blocks:
-                # No tool calls — extract final text and return
+                # No data request — extract final text and return (AB-5 casual or synthesis)
                 final_text = "".join(block.text for block in text_blocks)
                 return {
                     "message": final_text,
@@ -103,7 +138,7 @@ class OrchestratorAgent:
                     "tool_calls": tool_calls,
                 }
 
-            # Process tool calls: execute each, collect results
+            # Process request_data calls: delegate each to the RetrieverAgent
             assistant_content: list[dict] = []
             tool_result_contents: list[dict] = []
 
@@ -117,56 +152,72 @@ class OrchestratorAgent:
                 )
 
             for tool_block in tool_use_blocks:
-                tool_name = tool_block.name
-                tool_input = tool_block.input
+                if tool_block.name != "request_data":
+                    # Safety: ignore unexpected tool calls
+                    logger.warning("Orchestrator called unexpected tool: %s", tool_block.name)
+                    continue
 
-                # Execute the tool via service layer (Gate 2 inside)
-                result = await execute_tool(
-                    tool_name=tool_name,
-                    tool_input=tool_input,
+                data_request = tool_block.input.get("description", "")
+                logger.info("Orchestrator requesting data: %s", data_request[:200])
+
+                # Delegate to the RetrieverAgent
+                retriever_result = await self._retriever.fetch_data(
+                    data_request=data_request,
+                    tools=available_tools,
                     session=session,
                     ctx=ctx,
                 )
 
-                # Track for tool call metadata (AB-4)
-                result_count = _count_results(result)
-                tool_calls.append(
-                    {
-                        "tool": tool_name,
-                        "input": tool_input,
-                        "result_count": result_count,
-                    }
+                # Extract source attribution and tool call metadata from retriever results
+                retriever_tool_results = retriever_result.get("tool_results", [])
+                for tr in retriever_tool_results:
+                    result_data = tr.get("result", {})
+                    tool_name = tr.get("tool", "")
+                    tool_input = tr.get("input", {})
+
+                    # Track tool calls for metadata (AB-4)
+                    result_count = _count_results(result_data)
+                    tool_calls.append(
+                        {
+                            "tool": tool_name,
+                            "input": tool_input,
+                            "result_count": result_count,
+                        }
+                    )
+
+                    # Build source attribution from actual data records
+                    if "error" not in result_data:
+                        sources.extend(_extract_sources(tool_name, result_data))
+
+                # Build the tool result to feed back to the orchestrator LLM
+                # Serialize the retriever's raw results so the orchestrator can synthesise
+                retriever_data = json.dumps(
+                    [tr.get("result", {}) for tr in retriever_tool_results],
+                    default=str,
                 )
 
-                # Build source attribution from actual data records
-                if "error" not in result:
-                    sources.extend(_extract_sources(tool_name, result))
-
-                # Add tool_use block for the assistant message
                 assistant_content.append(
                     {
                         "type": "tool_use",
                         "id": tool_block.id,
-                        "name": tool_name,
-                        "input": tool_input,
+                        "name": tool_block.name,
+                        "input": tool_block.input,
                     }
                 )
 
-                # Add tool result for the next user turn
                 tool_result_contents.append(
                     {
                         "type": "tool_result",
                         "tool_use_id": tool_block.id,
-                        "content": json.dumps(result, default=str),
+                        "content": retriever_data,
                     }
                 )
 
-            # Append the assistant turn (with tool_use blocks) and the
-            # user turn (with tool_result blocks) to the conversation
+            # Append the assistant turn and the tool result turn to the conversation
             messages.append({"role": "assistant", "content": assistant_content})
             messages.append({"role": "user", "content": tool_result_contents})
 
-            # If stop_reason is end_turn, the LLM is done even if it made tool calls
+            # If the LLM stopped for end_turn, break
             if response.stop_reason == "end_turn":
                 final_text = "".join(block.text for block in text_blocks)
                 return {
@@ -176,7 +227,7 @@ class OrchestratorAgent:
                 }
 
         # Safety fallback if max iterations reached
-        logger.warning("Orchestrator hit max tool-call iterations (%d)", MAX_TOOL_ITERATIONS)
+        logger.warning("Orchestrator hit max data-request iterations (%d)", MAX_DATA_REQUEST_ITERATIONS)
         return {
             "message": (
                 "I gathered some data but need to summarise. Please try rephrasing your question more specifically."
