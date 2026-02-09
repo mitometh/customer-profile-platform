@@ -30,14 +30,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from app.infrastructure.cache import close_redis, get_redis
     from app.infrastructure.database import dispose_engine
 
-    # Warm up connections
-    get_redis()
+    # Warm up connections and store on app.state for lifecycle management
+    redis = get_redis()
+    app.state.redis = redis
 
     # Connect RabbitMQ publisher (best-effort; ingestion still works without it)
     from app.infrastructure.logging import get_logger
 
     _startup_logger = get_logger("startup")
     publisher = get_publisher()
+    app.state.publisher = publisher
     try:
         await publisher.connect()
     except Exception as exc:
@@ -62,16 +64,18 @@ def create_app() -> FastAPI:
     # ----- Middleware (order matters: outermost first) -----
     from app.api.middleware import (
         AuthMiddleware,
-        ErrorHandlerMiddleware,
         add_cors_middleware,
+        app_error_handler,
+        unhandled_error_handler,
     )
+    from app.core.exceptions import AppError
 
-    # Stack (outermost → innermost): CORS → RequestLogging → ErrorHandler → Auth → Routes
-    # AuthMiddleware is innermost so ErrorHandlerMiddleware catches any unexpected errors.
     app.add_middleware(AuthMiddleware)
-    app.add_middleware(ErrorHandlerMiddleware)
     app.add_middleware(RequestLoggingMiddleware)
     add_cors_middleware(app)
+
+    app.add_exception_handler(AppError, app_error_handler)
+    app.add_exception_handler(Exception, unhandled_error_handler)
 
     # ----- Routers -----
     from app.api import router as api_router
