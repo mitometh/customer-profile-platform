@@ -10,12 +10,15 @@ The orchestrator is the primary AI agent that:
 
 import json
 import logging
+from datetime import date, datetime
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.client import AnthropicClient
 from app.agent.prompts import ORCHESTRATOR_SYSTEM_PROMPT
 from app.agent.tools import execute_tool
+from app.core.context import CallerContext
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +40,7 @@ class OrchestratorAgent:
         conversation_history: list[dict],
         user_context: dict,
         session: AsyncSession,
-        permissions: list[str],
+        ctx: CallerContext,
     ) -> dict:
         """Process a user message and return the response with sources.
 
@@ -47,7 +50,7 @@ class OrchestratorAgent:
             user_context: Dict with user_name, role, capabilities_summary,
                           and available_tools (Gate-1-filtered tool defs).
             session: Active database session for tool execution.
-            permissions: User's permission list for Gate 2 checks in tools.
+            ctx: Caller context for Gate 2 permission checks in tools.
 
         Returns:
             A dict with ``message`` (str), ``sources`` (list of source dicts),
@@ -122,7 +125,7 @@ class OrchestratorAgent:
                     tool_name=tool_name,
                     tool_input=tool_input,
                     session=session,
-                    permissions=permissions,
+                    ctx=ctx,
                 )
 
                 # Track for tool call metadata (AB-4)
@@ -154,7 +157,7 @@ class OrchestratorAgent:
                     {
                         "type": "tool_result",
                         "tool_use_id": tool_block.id,
-                        "content": json.dumps(result),
+                        "content": json.dumps(result, default=str),
                     }
                 )
 
@@ -195,6 +198,19 @@ def _count_results(result: dict) -> int:
     return 0
 
 
+def _json_safe(obj: object) -> object:
+    """Recursively convert non-JSON-serializable values to strings."""
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, (date, datetime)):
+        return obj.isoformat()
+    if isinstance(obj, UUID):
+        return str(obj)
+    return obj
+
+
 def _extract_sources(tool_name: str, result: dict) -> list[dict]:
     """Extract source attribution records from a tool result.
 
@@ -211,7 +227,7 @@ def _extract_sources(tool_name: str, result: dict) -> list[dict]:
                     {
                         "table": "customers",
                         "record_id": str(c["id"]),
-                        "fields_used": {k: v for k, v in c.items() if k != "id"},
+                        "fields_used": _json_safe({k: v for k, v in c.items() if k != "id"}),
                     }
                 )
 
@@ -223,7 +239,7 @@ def _extract_sources(tool_name: str, result: dict) -> list[dict]:
                     {
                         "table": "events",
                         "record_id": str(e["id"]),
-                        "fields_used": {k: v for k, v in e.items() if k != "id"},
+                        "fields_used": _json_safe({k: v for k, v in e.items() if k != "id"}),
                     }
                 )
 
@@ -235,7 +251,7 @@ def _extract_sources(tool_name: str, result: dict) -> list[dict]:
                 {
                     "table": "metrics",
                     "record_id": record_id,
-                    "fields_used": {k: v for k, v in m.items() if k not in ("id", "metric_key")},
+                    "fields_used": _json_safe({k: v for k, v in m.items() if k not in ("id", "metric_key")}),
                 }
             )
 
@@ -247,7 +263,7 @@ def _extract_sources(tool_name: str, result: dict) -> list[dict]:
             {
                 "table": table,
                 "record_id": str(result["id"]),
-                "fields_used": {k: v for k, v in result.items() if k != "id"},
+                "fields_used": _json_safe({k: v for k, v in result.items() if k != "id"}),
             }
         )
 
