@@ -335,14 +335,29 @@ def _random_dt_in_last_n_days(n: int) -> datetime:
 
 
 async def _seed_permissions(session: AsyncSession) -> dict[str, PermissionModel]:
-    """Seed the 15 permissions. Returns a code->model mapping."""
+    """Seed the 15 permissions. Returns a code->model mapping.
+
+    Handles permissions already inserted by Alembic migrations by
+    loading existing ones and only inserting missing ones.
+    """
     perm_map: dict[str, PermissionModel] = {}
+    created = 0
+
+    # Load any permissions already present (e.g., from migrations)
+    existing_result = await session.execute(select(PermissionModel))
+    for perm in existing_result.scalars():
+        perm_map[perm.code] = perm
+
     for code, description in ALL_PERMISSIONS:
+        if code in perm_map:
+            continue
         perm = PermissionModel(id=uuid4(), code=code, description=description)
         session.add(perm)
         perm_map[code] = perm
+        created += 1
+
     await session.flush()
-    print(f"  [+] Seeded {len(perm_map)} permissions")
+    print(f"  [+] Seeded {created} permissions ({len(perm_map)} total)")
     return perm_map
 
 
@@ -659,12 +674,13 @@ async def seed_database() -> None:
     print("=" * 60)
 
     async for session in get_session():
-        # Idempotency check: if any permissions exist, skip
-        result = await session.execute(select(PermissionModel).limit(1))
+        # Idempotency check: if any users exist, the seed has already run.
+        # (Cannot use permissions — the alembic migration inserts some.)
+        result = await session.execute(select(UserModel).limit(1))
         existing = result.scalar_one_or_none()
         if existing is not None:
             print(
-                "\n  [!] Database already seeded (permissions exist). Skipping.")
+                "\n  [!] Database already seeded (users exist). Skipping.")
             print("=" * 60)
             return
 

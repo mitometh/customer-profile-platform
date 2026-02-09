@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.client import AnthropicClient
 from app.agent.orchestrator import OrchestratorAgent
 from app.agent.rbac import filter_tools_by_permissions, get_capabilities_summary
-from app.agent.tools import TOOL_DEFINITIONS
+from app.agent.tools import RETRIEVER_TOOL_DEFINITIONS
 from app.application.dtos.chat import ChatResponseDTO, SourceAttribution, ToolCallAttribution
 from app.core.context import CallerContext
 from app.core.exceptions import LLMUnavailableError, NotFoundError
@@ -73,7 +73,7 @@ class ChatService:
         conversation_history = self._build_conversation_history(chat_session)
 
         # Gate 1: filter tools by user permissions
-        available_tools = filter_tools_by_permissions(TOOL_DEFINITIONS, ctx)
+        available_tools = filter_tools_by_permissions(RETRIEVER_TOOL_DEFINITIONS, ctx)
         capabilities_summary = get_capabilities_summary(ctx)
 
         # Build user context for the orchestrator
