@@ -3,12 +3,15 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from app.api.dependencies import CurrentUserDTO
+from app.application.dtos.auth import CurrentUserDTO
 from app.application.dtos.auth import LoginResultDTO
 from app.core.exceptions import UnauthorizedError
-from app.infrastructure.repositories.role import SqlAlchemyRoleRepository
-from app.infrastructure.repositories.user import SqlAlchemyUserRepository
+from app.core.protocols import RoleRepository, UserRepository
 from app.infrastructure.security import create_access_token, hash_password, verify_password
+
+# Pre-computed dummy hash for timing-attack prevention.
+# Computed once at import time instead of on every login attempt.
+_DUMMY_HASH = hash_password("dummy-timing-pad")
 
 
 class AuthService:
@@ -16,8 +19,8 @@ class AuthService:
 
     def __init__(
         self,
-        user_repo: SqlAlchemyUserRepository,
-        role_repo: SqlAlchemyRoleRepository,
+        user_repo: UserRepository,
+        role_repo: RoleRepository,
     ) -> None:
         self._user_repo = user_repo
         self._role_repo = role_repo
@@ -37,8 +40,7 @@ class AuthService:
         # Always perform password verification to prevent timing attacks.
         # Use a dummy hash when user is not found so the response time is
         # indistinguishable from a wrong-password attempt.
-        _dummy_hash = hash_password("dummy-timing-pad")
-        password_hash = user.password_hash if user else _dummy_hash
+        password_hash = user.password_hash if user else _DUMMY_HASH
         is_valid = verify_password(password, password_hash)
 
         if user is None or not is_valid or not user.is_active:
