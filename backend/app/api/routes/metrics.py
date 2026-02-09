@@ -11,9 +11,8 @@ from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.dependencies import CurrentUserDTO, get_db, require_permission
+from app.api.dependencies import require_permission
 from app.api.schemas.metric import (
     CustomerMetricsResponse,
     CustomerMetricTrendSchema,
@@ -24,26 +23,12 @@ from app.api.schemas.metric import (
     MetricDefinitionUpdateRequest,
     TrendPointSchema,
 )
+from app.api.service_factories import get_metric_query_service
 from app.application.services.metric import MetricQueryService
-from app.infrastructure.repositories.customer import SqlAlchemyCustomerRepository
-from app.infrastructure.repositories.metric import (
-    SqlAlchemyCustomerMetricHistoryRepository,
-    SqlAlchemyCustomerMetricRepository,
-    SqlAlchemyMetricDefinitionRepository,
-)
+from app.core.context import CallerContext
 
 catalog_router = APIRouter()
 customer_metrics_router = APIRouter()
-
-
-def _build_metric_service(db: AsyncSession) -> MetricQueryService:
-    """Wire up the MetricQueryService with its repositories."""
-    return MetricQueryService(
-        definition_repo=SqlAlchemyMetricDefinitionRepository(db),
-        metric_repo=SqlAlchemyCustomerMetricRepository(db),
-        history_repo=SqlAlchemyCustomerMetricHistoryRepository(db),
-        customer_repo=SqlAlchemyCustomerRepository(db),
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -53,12 +38,11 @@ def _build_metric_service(db: AsyncSession) -> MetricQueryService:
 
 @catalog_router.get("/catalog", response_model=MetricCatalogResponse)
 async def get_metric_catalog(
-    user: CurrentUserDTO = Depends(require_permission("metrics.catalog.read")),
-    db: AsyncSession = Depends(get_db),
+    ctx: CallerContext = Depends(require_permission("metrics.catalog.read")),
+    service: MetricQueryService = Depends(get_metric_query_service),
 ) -> MetricCatalogResponse:
     """Return the full metric definitions catalog (no pagination)."""
-    service = _build_metric_service(db)
-    entries = await service.get_catalog(user.permissions)
+    entries = await service.get_catalog(ctx=ctx)
     return MetricCatalogResponse(
         metrics=[
             MetricCatalogEntrySchema(
@@ -82,19 +66,17 @@ async def get_metric_catalog(
 @catalog_router.post("/catalog", response_model=MetricCatalogEntrySchema, status_code=201)
 async def create_metric_definition(
     body: MetricDefinitionCreateRequest,
-    user: CurrentUserDTO = Depends(require_permission("metrics.catalog.manage")),
-    db: AsyncSession = Depends(get_db),
+    ctx: CallerContext = Depends(require_permission("metrics.catalog.manage")),
+    service: MetricQueryService = Depends(get_metric_query_service),
 ) -> MetricCatalogEntrySchema:
     """Create a new metric definition (admin only)."""
-    service = _build_metric_service(db)
     dto = await service.create_metric_definition(
         name=body.name,
         display_name=body.display_name,
         description=body.description,
         unit=body.unit,
         value_type=body.value_type.value,
-        permissions=user.permissions,
-        current_user_id=user.id,
+        ctx=ctx,
     )
     return MetricCatalogEntrySchema(
         id=dto.id,
@@ -110,11 +92,10 @@ async def create_metric_definition(
 async def update_metric_definition(
     metric_id: UUID,
     body: MetricDefinitionUpdateRequest,
-    user: CurrentUserDTO = Depends(require_permission("metrics.catalog.manage")),
-    db: AsyncSession = Depends(get_db),
+    ctx: CallerContext = Depends(require_permission("metrics.catalog.manage")),
+    service: MetricQueryService = Depends(get_metric_query_service),
 ) -> MetricCatalogEntrySchema:
     """Update a metric definition (admin only)."""
-    service = _build_metric_service(db)
     updates = body.model_dump(exclude_unset=True)
     # Convert enum to string value if present
     if "value_type" in updates and updates["value_type"] is not None:
@@ -122,8 +103,7 @@ async def update_metric_definition(
     dto = await service.update_metric_definition(
         metric_id=metric_id,
         updates=updates,
-        permissions=user.permissions,
-        current_user_id=user.id,
+        ctx=ctx,
     )
     return MetricCatalogEntrySchema(
         id=dto.id,
@@ -138,15 +118,13 @@ async def update_metric_definition(
 @catalog_router.delete("/catalog/{metric_id}", status_code=204)
 async def delete_metric_definition(
     metric_id: UUID,
-    user: CurrentUserDTO = Depends(require_permission("metrics.catalog.manage")),
-    db: AsyncSession = Depends(get_db),
+    ctx: CallerContext = Depends(require_permission("metrics.catalog.manage")),
+    service: MetricQueryService = Depends(get_metric_query_service),
 ) -> Response:
     """Soft-delete a metric definition (admin only)."""
-    service = _build_metric_service(db)
     await service.delete_metric_definition(
         metric_id=metric_id,
-        permissions=user.permissions,
-        current_user_id=user.id,
+        ctx=ctx,
     )
     return Response(status_code=204)
 
@@ -159,12 +137,11 @@ async def delete_metric_definition(
 @customer_metrics_router.get("", response_model=CustomerMetricsResponse)
 async def get_customer_metrics(
     customer_id: UUID,
-    user: CurrentUserDTO = Depends(require_permission("metrics.read")),
-    db: AsyncSession = Depends(get_db),
+    ctx: CallerContext = Depends(require_permission("metrics.read")),
+    service: MetricQueryService = Depends(get_metric_query_service),
 ) -> CustomerMetricsResponse:
     """Return all pre-computed metric values for a customer."""
-    service = _build_metric_service(db)
-    metrics = await service.get_customer_metrics(customer_id, user.permissions)
+    metrics = await service.get_customer_metrics(customer_id, ctx=ctx)
     return CustomerMetricsResponse(
         customer_id=customer_id,
         metrics=[
@@ -199,18 +176,17 @@ async def get_customer_metric_history(
     since: datetime | None = Query(default=None),
     until: datetime | None = Query(default=None),
     limit: int = Query(default=90, ge=1, le=365),
-    user: CurrentUserDTO = Depends(require_permission("metrics.read")),
-    db: AsyncSession = Depends(get_db),
+    ctx: CallerContext = Depends(require_permission("metrics.read")),
+    service: MetricQueryService = Depends(get_metric_query_service),
 ) -> CustomerMetricTrendSchema:
     """Return historical trend data for a specific customer metric."""
-    service = _build_metric_service(db)
     trend = await service.get_metric_history(
         customer_id=customer_id,
         metric_id=metric_id,
         since=since,
         until=until,
         limit=limit,
-        permissions=user.permissions,
+        ctx=ctx,
     )
     return CustomerMetricTrendSchema(
         customer_id=trend.customer_id,
