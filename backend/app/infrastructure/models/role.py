@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy import Boolean, ForeignKey, Index, String
 from sqlalchemy.dialects import postgresql as pg
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,10 @@ class RoleModel(Base, TimestampMixin, SoftDeleteMixin):
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+
+    __table_args__ = (
+        Index("ix_roles_deleted_at", "deleted_at"),
+    )
 
     # --- Relationships ---
     permissions: Mapped[list["PermissionModel"]] = relationship(

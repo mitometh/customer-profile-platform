@@ -37,6 +37,7 @@ class EventModel(Base, SoftDeleteMixin):
             "event_type",
             occurred_at.desc(),
         ),
+        Index("ix_events_deleted_at", "deleted_at"),
     )
 
     # --- Relationships ---

@@ -2,7 +2,7 @@
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, String, Text
+from sqlalchemy import Boolean, Index, String, Text
 from sqlalchemy.dialects import postgresql as pg
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -17,3 +17,7 @@ class SourceModel(Base, TimestampMixin, AuditMixin, SoftDeleteMixin):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     api_token_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        Index("ix_sources_deleted_at", "deleted_at"),
+    )
