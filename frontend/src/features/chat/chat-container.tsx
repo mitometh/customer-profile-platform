@@ -11,17 +11,16 @@ import { MessageList } from "@/features/chat/message-list";
 import { ChatInput } from "@/features/chat/chat-input";
 import { SessionList } from "@/features/chat/session-list";
 
-interface ChatState {
+export interface ChatState {
   sessionId: string | null;
   messages: ChatMessage[];
   isLoading: boolean;
   error: string | null;
   sessions: SessionSummary[];
   sessionsLoading: boolean;
-  showHistory: boolean;
 }
 
-type ChatAction =
+export type ChatAction =
   | { type: "ADD_USER_MESSAGE"; payload: string }
   | { type: "ADD_ASSISTANT_MESSAGE"; payload: ChatMessage }
   | { type: "SET_LOADING"; payload: boolean }
@@ -30,8 +29,7 @@ type ChatAction =
   | { type: "NEW_SESSION" }
   | { type: "SET_SESSIONS"; payload: SessionSummary[] }
   | { type: "SET_SESSIONS_LOADING"; payload: boolean }
-  | { type: "LOAD_SESSION"; payload: { sessionId: string; messages: ChatMessage[] } }
-  | { type: "TOGGLE_HISTORY" };
+  | { type: "LOAD_SESSION"; payload: { sessionId: string; messages: ChatMessage[] } };
 
 const initialState: ChatState = {
   sessionId: null,
@@ -40,10 +38,9 @@ const initialState: ChatState = {
   error: null,
   sessions: [],
   sessionsLoading: false,
-  showHistory: false,
 };
 
-function chatReducer(state: ChatState, action: ChatAction): ChatState {
+export function chatReducer(state: ChatState, action: ChatAction): ChatState {
   switch (action.type) {
     case "ADD_USER_MESSAGE":
       return {
@@ -77,16 +74,13 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         sessionId: action.payload.sessionId,
         messages: action.payload.messages,
         error: null,
-        showHistory: false,
       };
-    case "TOGGLE_HISTORY":
-      return { ...state, showHistory: !state.showHistory };
     default:
       return state;
   }
 }
 
-function getErrorMessage(err: unknown): string {
+export function getErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     const codeMap: Record<string, string> = {
       UNAUTHORIZED: "Your session has expired. Please log in again.",
@@ -184,40 +178,21 @@ export function ChatContainer(): preact.JSX.Element {
     }
   }, []);
 
-  const handleToggleHistory = useCallback((): void => {
-    dispatch({ type: "TOGGLE_HISTORY" });
-  }, []);
-
   return (
     <div class="flex h-full">
-      {/* Session history sidebar */}
-      {state.showHistory && (
-        <SessionList
-          sessions={state.sessions}
-          activeSessionId={state.sessionId}
-          isLoading={state.sessionsLoading}
-          onSelect={handleSelectSession}
-          onNewSession={handleNewSession}
-          onClose={handleToggleHistory}
-        />
-      )}
+      {/* Session history sidebar — always visible */}
+      <SessionList
+        sessions={state.sessions}
+        activeSessionId={state.sessionId}
+        isLoading={state.sessionsLoading}
+        onSelect={handleSelectSession}
+        onNewSession={handleNewSession}
+      />
 
       {/* Main chat area */}
       <div class="flex flex-col flex-1 min-w-0">
         <div class="flex items-center justify-between border-b border-gray-200 px-6 py-3">
-          <div class="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={handleToggleHistory}
-              class="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition-colors"
-              title={state.showHistory ? "Hide history" : "Show history"}
-            >
-              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-              </svg>
-            </button>
-            <h1 class="text-lg font-semibold leading-7 text-gray-950">Customer 360 Chat</h1>
-          </div>
+          <h1 class="text-lg font-semibold leading-7 text-gray-950">Customer 360 Chat</h1>
           <Button variant="secondary" size="sm" onClick={handleNewSession}>
             New Conversation
           </Button>

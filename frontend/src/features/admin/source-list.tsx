@@ -39,7 +39,7 @@ export function SourceList({ class: className }: SourceListProps): preact.JSX.El
 
   useEffect(() => {
     refresh();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRegister = (): void => {
     setEditingSource(undefined);

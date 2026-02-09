@@ -35,7 +35,7 @@ export function AuthProvider({ children }: { children: ComponentChildren }): Com
         })
         .finally(() => setIsLoading(false));
     }
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const login = useCallback(async (email: string, password: string) => {
     const response = await apiLogin({ email, password });

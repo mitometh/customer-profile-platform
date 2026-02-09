@@ -8,7 +8,6 @@ interface SessionListProps {
   isLoading: boolean;
   onSelect: (sessionId: string) => void;
   onNewSession: () => void;
-  onClose: () => void;
 }
 
 function formatRelativeTime(dateStr: string | null): string {
@@ -37,34 +36,21 @@ export function SessionList({
   isLoading,
   onSelect,
   onNewSession,
-  onClose,
 }: SessionListProps): preact.JSX.Element {
   return (
     <div class="w-72 flex-shrink-0 border-r border-gray-200 bg-gray-50 flex flex-col h-full">
       <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200">
         <h2 class="text-sm font-semibold text-gray-700">History</h2>
-        <div class="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={onNewSession}
-            class="p-1 rounded text-gray-500 hover:bg-gray-200 hover:text-gray-700 transition-colors"
-            title="New conversation"
-          >
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            class="p-1 rounded text-gray-500 hover:bg-gray-200 hover:text-gray-700 transition-colors"
-            title="Close history"
-          >
-            <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onNewSession}
+          class="p-1 rounded text-gray-500 hover:bg-gray-200 hover:text-gray-700 transition-colors"
+          title="New conversation"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+        </button>
       </div>
 
       <div class="flex-1 overflow-y-auto">

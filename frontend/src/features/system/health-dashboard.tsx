@@ -64,7 +64,7 @@ export function HealthDashboard({ class: className }: HealthDashboardProps): pre
         clearInterval(intervalRef.current);
       }
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (isLoading && !health) {
     return (
